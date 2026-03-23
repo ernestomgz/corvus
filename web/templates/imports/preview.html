@@ -47,6 +47,13 @@
                                 <div>
                                     <div class="text-xs uppercase tracking-wide text-gray-500">Deck</div>
                                     <div class="text-sm text-gray-700">{{ card.deck_path|join:' / ' }}</div>
+                                    {% if card.import_id %}
+                                        <div class="text-xs uppercase tracking-wide text-gray-500 mt-1">ID</div>
+                                        <div class="text-sm text-gray-700 font-mono">{{ card.import_id }}</div>
+                                    {% else %}
+                                        <div class="text-xs uppercase tracking-wide text-gray-500 mt-1">ID</div>
+                                        <div class="text-sm text-gray-400">Auto-generated</div>
+                                    {% endif %}
                                 </div>
                                 <div class="flex flex-col gap-1 text-xs text-gray-500">
                                     <label class="inline-flex items-center gap-1">
@@ -63,6 +70,13 @@
                                 <div class="rounded border border-red-200 bg-red-50 p-3 text-xs text-red-700 space-y-1">
                                     {% for error in card.errors %}
                                         <p>{{ error }}</p>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                            {% if card.warnings %}
+                                <div class="rounded border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-700 space-y-1">
+                                    {% for warning in card.warnings %}
+                                        <p>{{ warning }}</p>
                                     {% endfor %}
                                 </div>
                             {% endif %}
@@ -96,6 +110,10 @@
                                     <div>
                                         <div class="text-xs uppercase tracking-wide text-gray-500">Deck</div>
                                         <div class="text-sm text-gray-700">{{ card.deck_path|join:' / ' }}</div>
+                                        {% if card.import_id %}
+                                            <div class="text-xs uppercase tracking-wide text-gray-500 mt-1">ID</div>
+                                            <div class="text-sm text-gray-700 font-mono">{{ card.import_id }}</div>
+                                        {% endif %}
                                     </div>
                                     <div class="flex items-center gap-3 text-xs text-gray-500">
                                         <label class="inline-flex items-center gap-1">
@@ -111,6 +129,13 @@
                                         <div class="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 w-full">
                                             {% for error in card.errors %}
                                                 <p>{{ error }}</p>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                    {% if card.warnings %}
+                                        <div class="rounded border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700 w-full">
+                                            {% for warning in card.warnings %}
+                                                <p>{{ warning }}</p>
                                             {% endfor %}
                                         </div>
                                     {% endif %}

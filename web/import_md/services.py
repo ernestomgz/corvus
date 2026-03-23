@@ -27,6 +27,7 @@ MEDIA_WIKI_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ID_PATTERN = re.compile(r'^\s*id::\s*(?P<id>[\w:-]+)', re.IGNORECASE)
+IMPORT_ID_PATTERN = re.compile(r'#card\s+id:([a-f0-9]+)', re.IGNORECASE)
 TAGS_PATTERN = re.compile(r'^\s*tags::\s*(?P<tags>.+)$', re.IGNORECASE)
 MEDIA_PATTERN = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
 HEADING_PATTERN = re.compile(r'^\s*#+\s*')
@@ -46,6 +47,7 @@ class ParsedCard:
     deck_path: list[str]
     card_type_slug: str
     errors: list[str]
+    import_id: str | None = None
 
 
 @dataclass
@@ -252,12 +254,6 @@ def _build_marker_resolver(user) -> MarkerResolver:
     return MarkerResolver(pattern=marker_regex, clean_pattern=clean_pattern, lookup=lookup)
 
 
-def _generate_external_key(source_path: str, line_no: int, front_md: str) -> str:
-    data = f"{source_path}:{line_no}:{front_md.strip().lower()}".encode('utf-8', 'ignore')
-    digest = hashlib.sha1(data).hexdigest()
-    return f"c_{digest}"
-
-
 def _ensure_media_directory(user_id: int) -> Path:
     user_media_dir = Path(settings.MEDIA_ROOT) / str(user_id)
     user_media_dir.mkdir(parents=True, exist_ok=True)
@@ -461,6 +457,14 @@ def _parse_markdown_cards(
         if front_content:
             front_content = _clean_front_text(front_content)
 
+        # Parse import ID from marker line
+        import_id = None
+        import_id_match = IMPORT_ID_PATTERN.search(line)
+        if import_id_match:
+            import_id = import_id_match.group(1).lower()
+            # Remove the id part from front_content if it was there
+            front_content = IMPORT_ID_PATTERN.sub('', front_content).strip()
+
         if not front_content:
             j = i - 1
             collected: list[str] = []
@@ -556,6 +560,7 @@ def _parse_markdown_cards(
             deck_path=list(deck_parts),
             card_type_slug=suggested_type,
             errors=list(card_errors),
+            import_id=import_id,
         )
         parsed_cards.append(base_card)
         if reverse_flag:
@@ -574,6 +579,7 @@ def _parse_markdown_cards(
                     deck_path=list(deck_parts),
                     card_type_slug=reverse_type,
                     errors=list(card_errors),
+                    import_id=import_id,
                 )
             )
     return parsed_cards
@@ -630,6 +636,36 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
     parsed_cards, parse_summary = _collect_markdown_cards(
         user_id=user.id, uploaded_file=uploaded_file, resolver=resolver
     )
+    
+    # Handle import IDs
+    import_ids = [card.import_id for card in parsed_cards if card.import_id]
+    existing_import_id_map = {}
+    if import_ids:
+        existing_import_id_map = {
+            card.import_id: card
+            for card in Card.objects.filter(user=user, import_id__in=import_ids)
+        }
+    
+    # Generate sequential IDs for cards without explicit IDs
+    used_ids = set(Card.objects.filter(import_id__isnull=False).values_list('import_id', flat=True))
+    for card in parsed_cards:
+        if not card.import_id:
+            # Find next available sequential hex ID
+            next_id = 1
+            while True:
+                candidate = hex(next_id)[2:].lower()
+                if candidate not in used_ids:
+                    card.import_id = candidate
+                    used_ids.add(candidate)
+                    break
+                next_id += 1
+        else:
+            # Validate the provided ID format
+            try:
+                int(card.import_id, 16)
+            except ValueError:
+                card.errors.append(f"Invalid import ID format: '{card.import_id}'. Must be hexadecimal.")
+    
     external_keys = [card.external_key for card in parsed_cards]
     existing_map = {
         external.external_key: external
@@ -658,6 +694,7 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
                 f"File '{parsed.source_path}' must be inside a folder in the archive when no destination deck is selected."
             )
         card_errors = list(parsed.errors)
+        card_warnings = []
         if card_errors:
             has_invalid_cards = True
         external = existing_map.get(parsed.external_key)
@@ -683,11 +720,21 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
                         fallback_card = candidate
                         break
         existing_card = None
+        import_id_conflict = None
+        if parsed.import_id in existing_import_id_map:
+            import_id_conflict = existing_import_id_map[parsed.import_id]
+            if import_id_conflict != existing_card:
+                # Different card has this import_id - this is a conflict
+                card_warnings.append(f"Import ID '{parsed.import_id}' already exists on a different card. This will update that card.")
+        
         if external and external.card.user == user:
             existing_card = external.card
         elif fallback_card:
             existing_card = fallback_card
             consumed_source_ids.add(fallback_card.id)
+        elif import_id_conflict:
+            # Use the card with the conflicting import_id
+            existing_card = import_id_conflict
         if existing_card:
             display_tags = _merge_tags(existing_card.tags, incoming_tags)
             existing_payload = {
@@ -728,6 +775,7 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
             {
                 'index': index,
                 'external_key': parsed.external_key,
+                'import_id': parsed.import_id,
                 'front_md': display_front,
                 'back_md': display_back,
                 'tags': display_tags,
@@ -742,6 +790,7 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
                 'field_values': field_values,
                 'context': parsed.context_md,
                 'errors': card_errors,
+                'warnings': card_warnings,
                 'diff': diff_payload,
             }
         )
@@ -874,6 +923,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                     existing_card.source_anchor = card_data.get('source_anchor')
                     existing_card.deck = target_deck
                     existing_card.field_values = field_values
+                    existing_card.import_id = card_data.get('import_id')
                     existing_card.save(
                         update_fields=[
                             'front_md',
@@ -885,6 +935,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                             'deck',
                             'card_type',
                             'field_values',
+                            'import_id',
                             'updated_at',
                         ]
                     )
@@ -914,6 +965,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                     source_path=card_data.get('source_path'),
                     source_anchor=card_data.get('source_anchor'),
                     field_values=field_values,
+                    import_id=card_data.get('import_id'),
                 )
                 ExternalId.objects.get_or_create(
                     card=card,
@@ -942,6 +994,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                     source_path=card_data.get('source_path'),
                     source_anchor=card_data.get('source_anchor'),
                     field_values=field_values,
+                    import_id=card_data.get('import_id'),
                 )
                 recovery_key = card_data['external_key']
                 conflict = ExternalId.objects.filter(external_key=recovery_key).exclude(card__user_id=session.user_id).exists()
@@ -967,6 +1020,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
             existing_card.source_anchor = card_data.get('source_anchor')
             existing_card.deck = target_deck
             existing_card.field_values = field_values
+            existing_card.import_id = card_data.get('import_id')
             existing_card.save(
                 update_fields=[
                     'front_md',
@@ -978,6 +1032,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                     'deck',
                     'card_type',
                     'field_values',
+                    'import_id',
                     'updated_at',
                 ]
             )

@@ -80,6 +80,7 @@ def _card_to_dict(card: Card) -> dict:
     state = getattr(card, 'scheduling_state', None) or ensure_state(card)
     return {
         'id': str(card.id),
+        'import_id': card.import_id,
         'deck_id': card.deck_id,
         'card_type': _card_type_slug(card),
         'front_md': card.front_md,

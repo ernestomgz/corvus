@@ -176,8 +176,8 @@ def _normalise_wiki_links(text: str) -> str:
     return _WIKI_LINK_RE.sub(repl, text)
 
 
-def _looks_like_html(value: str) -> bool:
-    return bool(_HTML_SNIFFER.search(value))
+#def _looks_like_html(value: str) -> bool:
+#    return bool(_HTML_SNIFFER.search(value))
 
 
 def _normalise_classes(existing: list[str], required: list[str]) -> list[str]:
@@ -356,12 +356,16 @@ def _has_known_delimiters(value: str) -> bool:
 def render_to_html(content: str | None) -> str:
     if not content:
         return ''
-    if _looks_like_html(content):
-        html_value = _wrap_raw_math(content)
-    else:
-        html_value = _render_markdown_cached(content)
+
+    # 1. ALWAYS render through Markdown first. 
+    # This identifies ```bash blocks correctly and escapes the < and > symbols.
+    html_value = _render_markdown_cached(content)
+
+    # 2. Promote specific blocks (like TikZ) that were safely parsed as code
     html_value = _promote_tikz_blocks(html_value)
-    html_value = _strip_unsafe_scripts(html_value)
+
+    # 3. Sanitize the HTML. 
+    # Bleach will now see the shell redirect as "&lt;", which is safe.
     cleaned = bleach.clean(
         html_value,
         tags=_ALLOWED_TAGS,
@@ -369,15 +373,8 @@ def render_to_html(content: str | None) -> str:
         protocols=_ALLOWED_PROTOCOLS,
         strip=True,
     )
-    if _contains_math_markup(content):
-        cleaned = _wrap_raw_math(cleaned)
-        if 'math' not in cleaned and not _has_known_delimiters(cleaned):
-            stripped = cleaned.strip()
-            if stripped.startswith('<p>') and stripped.endswith('</p>'):
-                inner = stripped[3:-4].strip()
-                if inner:
-                    cleaned = f'<p><span class="math math-inline">\\({inner}\\)</span></p>'
-            elif stripped:
-                cleaned = f'<span class="math math-inline">\\({stripped}\\)</span>'
+
+    # 4. Only ensure MathJax markup for things the parser ALREADY identified as math.
     cleaned = _ensure_mathjax_markup(cleaned)
+    
     return cleaned

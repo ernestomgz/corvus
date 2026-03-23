@@ -383,6 +383,15 @@ def _compose_front_text(body: str, context: str) -> str:
     return body
 
 
+def _generate_external_key(source_path: str, line_no: int, front_md: str) -> str:
+    """Generate a unique external key for a card based on its location and content."""
+    # Create a deterministic key based on file path and line number
+    key_base = f"{source_path}:{line_no}"
+    # Use first 8 chars of hash to keep it reasonably short
+    key_hash = hashlib.md5(key_base.encode('utf-8')).hexdigest()[:8]
+    return f"md_{key_hash}"
+
+
 def _build_field_values(parsed: ParsedCard) -> dict:
     hierarchy = (parsed.context_md or '').strip()
     title = (parsed.front_md or '').strip()

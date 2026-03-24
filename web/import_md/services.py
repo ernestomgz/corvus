@@ -27,7 +27,7 @@ MEDIA_WIKI_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ID_PATTERN = re.compile(r'^\s*id::\s*(?P<id>[\w:-]+)', re.IGNORECASE)
-IMPORT_ID_PATTERN = re.compile(r'#card\s+id:([a-f0-9]+)', re.IGNORECASE)
+IMPORT_ID_PATTERN = re.compile(r'(?<!\w)(?:#card|#long-card)\s+id:([a-f0-9]+)', re.IGNORECASE)
 TAGS_PATTERN = re.compile(r'^\s*tags::\s*(?P<tags>.+)$', re.IGNORECASE)
 MEDIA_PATTERN = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
 HEADING_PATTERN = re.compile(r'^\s*#+\s*')
@@ -513,12 +513,52 @@ def _parse_markdown_cards(
             i += 1
 
         back_lines: list[str] = []
+        long_card_mode = marker_text == '#long-card' or (rule and rule.token.lower() == '#long-card')
+        in_fenced_block = False
+        fence_delim = ''
+        consecutive_blank = 0
+
         while i < len(lines):
             candidate = lines[i]
-            if not candidate.strip():
+            stripped_line = candidate.strip()
+
+            # Detect fenced code block markers to ignore blank-line termination inside code blocks
+            if stripped_line.startswith('```') or stripped_line.startswith('~~~'):
+                current_delim = stripped_line[:3]
+                if not in_fenced_block:
+                    in_fenced_block = True
+                    fence_delim = current_delim
+                elif current_delim == fence_delim:
+                    in_fenced_block = False
+                    fence_delim = ''
+
+            # New marker starts next card (unless inside fenced block)
+            if not in_fenced_block and resolver.pattern.search(candidate):
                 break
-            if resolver.pattern.search(candidate):
-                break
+
+            if not long_card_mode:
+                if not stripped_line:
+                    break
+                back_lines.append(candidate)
+                i += 1
+                continue
+
+            # Long-card mode: allow single blank lines inside back content
+            if not stripped_line and not in_fenced_block:
+                consecutive_blank += 1
+                if consecutive_blank >= 2:
+                    i += 1
+                    break
+                back_lines.append('')
+                i += 1
+                continue
+
+            if not stripped_line and in_fenced_block:
+                back_lines.append(candidate)
+                i += 1
+                continue
+
+            consecutive_blank = 0
             back_lines.append(candidate)
             i += 1
 

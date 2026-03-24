@@ -395,6 +395,101 @@ def test_import_uses_card_type_marker(user_factory, deck_factory):
     assert card.card_type.slug == 'photo'
 
 
+def test_import_long_card_preserves_single_blank_lines(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        "Question line 1\n"
+        "Question line 2\n"
+        "#long-card\n"
+        "response line 1\n"
+        "response line 2\n"
+        "\n"
+        "response line 3\n"
+        "end of response\n"
+        "\n"
+        "\n"
+    )
+    archive = _build_zip({'note.md': markdown})
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    assert record.summary['created'] == 1
+    card = Card.objects.get(user=user)
+    assert card.card_type.slug == 'long-card'
+    assert card.front_md == 'Question line 1\nQuestion line 2'
+    assert card.back_md == 'response line 1\nresponse line 2\n\nresponse line 3\nend of response'
+
+
+def test_import_long_card_with_id_and_heading_context_and_update(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        "# Topic\n"
+        "## Subtopic\n"
+        "Question ST\n"
+        "#long-card id:123\n"
+        "Initial answer paragraph\n"
+        "\n"
+        "Initial additional content\n"
+        "\n"
+        "\n"
+    )
+    archive = _build_zip({'note.md': markdown})
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    assert record.summary['created'] == 1
+    card = Card.objects.get(user=user)
+    assert card.card_type.slug == 'long-card'
+    assert card.import_id == '123'
+    assert card.front_md.startswith('Topic > Subtopic')
+    assert 'Initial answer paragraph' in card.back_md
+
+    # Update same card via same import_id
+    markdown_update = (
+        "# Topic\n"
+        "## Subtopic\n"
+        "Question ST\n"
+        "#long-card id:123\n"
+        "Updated answer paragraph\n"
+        "\n"
+        "Updated additional content\n"
+        "\n"
+        "\n"
+    )
+    archive_update = _build_zip({'note.md': markdown_update})
+    record2 = process_markdown_archive(user=user, deck=deck, uploaded_file=archive_update)
+    assert record2.summary['updated'] == 1
+    card.refresh_from_db()
+    assert 'Updated answer paragraph' in card.back_md
+
+
+def test_import_long_card_supports_fenced_code_block_blank_lines(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        "Question verbatim\n"
+        "#long-card\n"
+        "Answer paragraph\n"
+        "```\n"
+        "code line 1\n"
+        "\n"
+        "\n"
+        "code line 2\n"
+        "\n"
+        "code line 3\n"
+        "```\n"
+        "\n"
+        "Additional paragraph\n"
+        "\n"
+        "\n"
+    )
+    archive = _build_zip({'note.md': markdown})
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    assert record.summary['created'] == 1
+    card = Card.objects.get(user=user)
+    assert card.card_type.slug == 'long-card'
+    assert 'code line 1' in card.back_md
+    assert 'Additional paragraph' in card.back_md
+
+
 def test_import_updates_merge_tags(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)

@@ -200,6 +200,9 @@ def _merge_tags(existing: list[str] | None, incoming: list[str] | None) -> list[
 
 
 def _build_marker_resolver(user) -> MarkerResolver:
+    from core.services.card_types import ensure_builtin_card_types
+    ensure_builtin_card_types()
+    
     formats = (
         CardImportFormat.objects.select_related('card_type')
         .filter(format_kind='markdown')
@@ -471,8 +474,15 @@ def _parse_markdown_cards(
         import_id_match = IMPORT_ID_PATTERN.search(line)
         if import_id_match:
             import_id = import_id_match.group(1).lower()
-            # Remove the id part from front_content if it was there
-            front_content = IMPORT_ID_PATTERN.sub('', front_content).strip()
+            # If front_content is just the ID part, remove it
+            if front_content and front_content.lower().startswith('id:'):
+                front_content = ''
+        elif front_after and front_after.lower().startswith('id:'):
+            # Handle inline id: syntax without full marker pattern
+            id_match = re.match(r'id:([a-f0-9]+)', front_after, re.IGNORECASE)
+            if id_match:
+                import_id = id_match.group(1).lower()
+                front_content = front_before  # Remove the id part from front_content
 
         if not front_content:
             j = i - 1

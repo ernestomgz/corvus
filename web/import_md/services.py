@@ -7,6 +7,7 @@ import json
 import re
 import zipfile
 import difflib
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -490,6 +491,9 @@ def _parse_markdown_cards(
             while j >= 0 and lines[j].strip():
                 if HEADING_CAPTURE_PATTERN.match(lines[j]):
                     break
+                # Don't include marker lines from previous cards
+                if resolver.pattern.search(lines[j]):
+                    break
                 collected.insert(0, lines[j].strip())
                 j -= 1
             front_content = '\n'.join(collected).strip()
@@ -700,6 +704,13 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
     
     # Handle import IDs
     import_ids = [card.import_id for card in parsed_cards if card.import_id]
+    
+    # Check for duplicate import IDs within this session
+    import_id_counts = Counter(import_ids)
+    for card in parsed_cards:
+        if card.import_id and import_id_counts[card.import_id] > 1:
+            card.errors.append(f"Import ID '{card.import_id}' is used by multiple cards in this import. Each card must have a unique import ID.")
+    
     existing_import_id_map = {}
     if import_ids:
         existing_import_id_map = {
@@ -726,6 +737,19 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
                 int(card.import_id, 16)
             except ValueError:
                 card.errors.append(f"Invalid import ID format: '{card.import_id}'. Must be hexadecimal.")
+    
+    # Detect duplicate import_ids within this import session
+    import_id_counts: dict[str, list[int]] = {}
+    for idx, card in enumerate(parsed_cards):
+        if card.import_id:
+            import_id_counts.setdefault(card.import_id, []).append(idx)
+    
+    for import_id, indices in import_id_counts.items():
+        if len(indices) > 1:
+            for idx in indices:
+                parsed_cards[idx].errors.append(
+                    f"Duplicate import ID '{import_id}' found in this import (also used in card at index {[i for i in indices if i != idx]}). Each card must have a unique ID."
+                )
     
     external_keys = [card.external_key for card in parsed_cards]
     existing_map = {

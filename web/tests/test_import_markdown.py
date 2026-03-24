@@ -30,7 +30,7 @@ def _build_zip(contents: dict[str, str], media: dict[str, bytes] | None = None) 
 def test_md_card_extraction(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)
-    archive = _build_zip({'notes/sample.md': '#card What is 2+2?\n\nFour'})
+    archive = _build_zip({'notes/sample.md': 'What is 2+2?\n#card\nFour'})
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     assert record.summary['created'] == 1
     card = Card.objects.get(user=user)
@@ -73,7 +73,7 @@ def test_md_media_copy_and_rewrite(user_factory, deck_factory, settings):
     user = user_factory()
     deck = deck_factory(user=user)
     image_bytes = b'fake-image-bytes'
-    markdown = '#card Diagram\n\n![alt](assets/diagram.png)'
+    markdown = 'Diagram\n#card\n![alt](assets/diagram.png)'
     archive = _build_zip({'note.md': markdown}, media={'assets/diagram.png': image_bytes})
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     card = Card.objects.get(user=user)
@@ -90,7 +90,7 @@ def test_md_obsidian_resized_media_is_found(user_factory, deck_factory, settings
     user = user_factory()
     deck = deck_factory(user=user)
     image_bytes = b'fake-image'
-    markdown = '#card Photo\n\n![[photo.png|200]]'
+    markdown = 'Photo\n#card\n![[photo.png|200]]'
     archive = _build_zip({'note.md': markdown}, media={'photo.png': image_bytes})
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     card = Card.objects.get(user=user)
@@ -116,7 +116,7 @@ def test_md_import_id_parsing(user_factory, deck_factory):
 def test_md_import_id_auto_generation(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)
-    markdown = '#card Question without ID\n\nAnswer'
+    markdown = 'Question without ID\n#card\nAnswer'
     archive = _build_zip({'note.md': markdown})
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     assert record.summary['created'] == 1
@@ -132,7 +132,7 @@ def test_md_import_id_update_existing(user_factory, deck_factory):
     deck = deck_factory(user=user)
     
     # Create initial card
-    markdown1 = '## Original\n#card id:abc\n\nOriginal answer'
+    markdown1 = '## Original\n#card id:abc\nOriginal answer'
     archive1 = _build_zip({'note.md': markdown1})
     record1 = process_markdown_archive(user=user, deck=deck, uploaded_file=archive1)
     assert record1.summary['created'] == 1
@@ -141,7 +141,7 @@ def test_md_import_id_update_existing(user_factory, deck_factory):
     assert card.front_md == 'Original'
     
     # Update the same card
-    markdown2 = '## Updated\n#card id:abc\n\nUpdated answer'
+    markdown2 = '## Updated\n#card id:abc\nUpdated answer'
     archive2 = _build_zip({'note.md': markdown2})
     record2 = process_markdown_archive(user=user, deck=deck, uploaded_file=archive2)
     assert record2.summary['updated'] == 1
@@ -155,13 +155,13 @@ def test_md_import_id_conflict_warning(user_factory, deck_factory):
     deck = deck_factory(user=user)
     
     # Create first card
-    markdown1 = '#card id:123\n\nFirst answer'
+    markdown1 = 'First question\n#card id:123\n\nFirst answer'
     archive1 = _build_zip({'note1.md': markdown1})
     record1 = process_markdown_archive(user=user, deck=deck, uploaded_file=archive1)
     assert record1.summary['created'] == 1
     
     # Try to create second card with same ID
-    markdown2 = '#card id:123\n\nSecond answer'
+    markdown2 = 'Second question\n#card id:123\n\nSecond answer'
     archive2 = _build_zip({'note2.md': markdown2})
     session = prepare_markdown_session(user=user, deck=deck, uploaded_file=archive2)
     
@@ -175,7 +175,7 @@ def test_md_import_id_conflict_warning(user_factory, deck_factory):
 def test_md_import_id_invalid_format(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)
-    markdown = '#card id:invalid\n\nAnswer'
+    markdown = 'Question\n#card id:invalid\n\nAnswer'
     archive = _build_zip({'note.md': markdown})
     session = prepare_markdown_session(user=user, deck=deck, uploaded_file=archive)
     
@@ -189,7 +189,7 @@ def test_md_import_id_invalid_format(user_factory, deck_factory):
 def test_md_import_skips_root_folder(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user, name='Biology')
-    archive = _build_zip({'Biology/note.md': '#card Question\n\nAnswer'})
+    archive = _build_zip({'Biology/note.md': 'Question\n#card\nAnswer'})
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     assert record.summary['created'] == 1
     card = Card.objects.get(user=user)
@@ -200,7 +200,7 @@ def test_md_import_skips_root_folder(user_factory, deck_factory):
 def test_prepare_markdown_session_creates_payload(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)
-    archive = _build_zip({'cards/note.md': '#card Sample\nid:: example\n\nBack content'})
+    archive = _build_zip({'cards/note.md': 'Sample\n#card\nid:: example\n\nBack content'})
     session = prepare_markdown_session(user=user, deck=deck, uploaded_file=archive)
     assert session.status == 'ready'
     assert session.total == 1
@@ -212,7 +212,7 @@ def test_prepare_markdown_session_creates_payload(user_factory, deck_factory):
 def test_apply_markdown_session_respects_decision(card_factory, external_id_factory):
     existing_card = card_factory(front_md='Original', back_md='Answer')
     external_id_factory(card=existing_card, system='logseq', external_key='c_existing')
-    markdown = '#card Updated\nid:: c_existing\n\nReplacement'
+    markdown = 'Updated\n#card\nid:: c_existing\n\nReplacement'
     archive = _build_zip({'note.md': markdown})
     session = prepare_markdown_session(user=existing_card.user, deck=existing_card.deck, uploaded_file=archive)
     index = session.payload['cards'][0]['index']
@@ -225,7 +225,7 @@ def test_apply_markdown_session_respects_decision(card_factory, external_id_fact
 def test_apply_markdown_session_creates_child_decks(user_factory, deck_factory):
     user = user_factory()
     root_deck = deck_factory(user=user)
-    markdown = '#card Child card\n\nContent'
+    markdown = 'Child card\n#card\n\nContent'
     archive = _build_zip({'Sciences/Math/note.md': markdown})
     session = prepare_markdown_session(user=user, deck=root_deck, uploaded_file=archive)
     record = apply_markdown_session(session)
@@ -280,7 +280,7 @@ def test_prepare_session_requires_folders_without_root_deck(user_factory):
 
 def test_prepare_session_detects_missing_attachments(user_factory):
     user = user_factory()
-    markdown = '#card Diagram\n\n![[attachments/missing.png]]'
+    markdown = 'Diagram\n#card\n![[attachments/missing.png]]'
     archive = _build_zip({'Science/note.md': markdown})
     session = prepare_markdown_session(user=user, deck=None, uploaded_file=archive)
     card = session.payload['cards'][0]
@@ -291,7 +291,7 @@ def test_prepare_session_detects_missing_attachments(user_factory):
 
 def test_apply_session_builds_decks_from_archive_when_no_root(user_factory):
     user = user_factory()
-    markdown = '#card Integral rules\n\nRemember the basics.'
+    markdown = 'Integral rules\n#card\n\nRemember the basics.'
     archive = _build_zip({'Mathematics/Equations/differentials.md': markdown})
     session = prepare_markdown_session(user=user, deck=None, uploaded_file=archive)
     record = apply_markdown_session(session)

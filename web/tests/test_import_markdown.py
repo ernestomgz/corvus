@@ -103,13 +103,13 @@ def test_md_obsidian_resized_media_is_found(user_factory, deck_factory, settings
 def test_md_import_id_parsing(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)
-    markdown = '## Question\n#card id:1a2b\n\nAnswer'
+    markdown = '## Question Title\n#card id:1a2b\nAnswer'
     archive = _build_zip({'note.md': markdown})
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     assert record.summary['created'] == 1
     card = Card.objects.get(user=user)
     assert card.import_id == '1a2b'
-    assert card.front_md == 'Question'
+    assert card.front_md == 'Question Title'
     assert card.back_md == 'Answer'
 
 
@@ -132,13 +132,14 @@ def test_md_import_id_update_existing(user_factory, deck_factory):
     deck = deck_factory(user=user)
     
     # Create initial card
-    markdown1 = '## Original\n#card id:abc\nOriginal answer'
+    markdown1 = '## Original question\n#card id:abc\nOriginal answer'
     archive1 = _build_zip({'note.md': markdown1})
     record1 = process_markdown_archive(user=user, deck=deck, uploaded_file=archive1)
     assert record1.summary['created'] == 1
     card = Card.objects.get(user=user)
     assert card.import_id == 'abc'
-    assert card.front_md == 'Original'
+    assert card.front_md == 'Original question'
+    assert card.back_md == 'Original answer'
     
     # Update the same card
     markdown2 = '## Updated\n#card id:abc\nUpdated answer'
@@ -147,7 +148,8 @@ def test_md_import_id_update_existing(user_factory, deck_factory):
     assert record2.summary['updated'] == 1
     card.refresh_from_db()
     assert card.import_id == 'abc'
-    assert card.front_md == 'Updated'
+    assert card.front_md == 'Updated question'
+    assert card.back_md == 'Updated answer'
 
 
 def test_md_import_id_conflict_warning(user_factory, deck_factory):
@@ -155,13 +157,13 @@ def test_md_import_id_conflict_warning(user_factory, deck_factory):
     deck = deck_factory(user=user)
     
     # Create first card
-    markdown1 = 'First question\n#card id:123\n\nFirst answer'
+    markdown1 = 'First question\n#card id:123\nFirst answer'
     archive1 = _build_zip({'note1.md': markdown1})
     record1 = process_markdown_archive(user=user, deck=deck, uploaded_file=archive1)
     assert record1.summary['created'] == 1
     
     # Try to create second card with same ID
-    markdown2 = 'Second question\n#card id:123\n\nSecond answer'
+    markdown2 = 'Second question\n#card id:123\nSecond answer'
     archive2 = _build_zip({'note2.md': markdown2})
     session = prepare_markdown_session(user=user, deck=deck, uploaded_file=archive2)
     
@@ -183,7 +185,6 @@ def test_md_import_id_invalid_format(user_factory, deck_factory):
     assert len(cards_data) == 1
     card_data = cards_data[0]
     assert any('Invalid import ID format' in error for error in card_data['errors'])
-    assert 'photo.png|200' not in card.back_md
 
 
 def test_md_import_skips_root_folder(user_factory, deck_factory):

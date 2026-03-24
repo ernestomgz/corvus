@@ -27,7 +27,7 @@ MEDIA_WIKI_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ID_PATTERN = re.compile(r'^\s*id::\s*(?P<id>[\w:-]+)', re.IGNORECASE)
-IMPORT_ID_PATTERN = re.compile(r'(?<!\w)(?:#card|#long-card)\s+id:([a-f0-9]+)', re.IGNORECASE)
+IMPORT_ID_PATTERN = re.compile(r'(?<!\w)(?:#card|#long-card)\s+id:([^\s]+)', re.IGNORECASE)
 TAGS_PATTERN = re.compile(r'^\s*tags::\s*(?P<tags>.+)$', re.IGNORECASE)
 MEDIA_PATTERN = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
 HEADING_PATTERN = re.compile(r'^\s*#+\s*')
@@ -488,6 +488,8 @@ def _parse_markdown_cards(
             j = i - 1
             collected: list[str] = []
             while j >= 0 and lines[j].strip():
+                if HEADING_CAPTURE_PATTERN.match(lines[j]):
+                    break
                 collected.insert(0, lines[j].strip())
                 j -= 1
             front_content = '\n'.join(collected).strip()

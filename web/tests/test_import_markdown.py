@@ -142,7 +142,7 @@ def test_md_import_id_update_existing(user_factory, deck_factory):
     assert card.back_md == 'Original answer'
     
     # Update the same card
-    markdown2 = '## Updated\n#card id:abc\nUpdated answer'
+    markdown2 = '## Updated question\n#card id:abc\nUpdated answer'
     archive2 = _build_zip({'note.md': markdown2})
     record2 = process_markdown_archive(user=user, deck=deck, uploaded_file=archive2)
     assert record2.summary['updated'] == 1
@@ -440,7 +440,10 @@ def test_import_long_card_with_id_and_heading_context_and_update(user_factory, d
     card = Card.objects.get(user=user)
     assert card.card_type.slug == 'long-card'
     assert card.import_id == '123'
-    assert card.front_md.startswith('Topic > Subtopic')
+    # Hierarchy should be in front, followed by the question
+    lines = card.front_md.split('\n')
+    assert lines[0] == 'Topic > Subtopic'
+    assert any('Question ST' in line for line in lines)
     assert 'Initial answer paragraph' in card.back_md
 
     # Update same card via same import_id
@@ -459,6 +462,25 @@ def test_import_long_card_with_id_and_heading_context_and_update(user_factory, d
     record2 = process_markdown_archive(user=user, deck=deck, uploaded_file=archive_update)
     assert record2.summary['updated'] == 1
     card.refresh_from_db()
+    assert 'Updated answer paragraph' in card.back_md
+
+    # Update same card via same import_id
+    markdown_update = (
+        "# Topic\n"
+        "## Subtopic\n"
+        "Question ST\n"
+        "#long-card id:123\n"
+        "Updated answer paragraph\n"
+        "\n"
+        "Updated additional content\n"
+        "\n"
+        "\n"
+    )
+    archive_update = _build_zip({'note.md': markdown_update})
+    record2 = process_markdown_archive(user=user, deck=deck, uploaded_file=archive_update)
+    assert record2.summary['updated'] == 1
+    card.refresh_from_db()
+    assert 'id:123' not in card.back_md
     assert 'Updated answer paragraph' in card.back_md
 
 
@@ -597,14 +619,14 @@ def test_md_both_marker_positions_with_ids_work_correctly(user_factory, deck_fac
     # Mix of both marker positions
     markdown = (
         "### Section 1\n"
-        "Question A #card id:qa1\n"
+        "Question A #card id:1a1\n"
         "Answer A\n"
         "\n"
         "Question B\n"
-        "#card id:qb1\n"
+        "#card id:1b1\n"
         "Answer B\n"
         "\n"
-        "### Question C #card id:qc1\n"
+        "### Question C #card id:1c1\n"
         "Answer C"
     )
     archive = _build_zip({'note.md': markdown})
@@ -613,15 +635,15 @@ def test_md_both_marker_positions_with_ids_work_correctly(user_factory, deck_fac
     assert record.summary['created'] == 3
     
     cards = Card.objects.filter(user=user).order_by('import_id')
-    assert cards[0].import_id == 'qa1'
+    assert cards[0].import_id == '1a1'
     assert cards[0].front_md == 'Question A'
     assert cards[0].back_md == 'Answer A'
     
-    assert cards[1].import_id == 'qb1'
+    assert cards[1].import_id == '1b1'
     assert cards[1].front_md == 'Question B'
     assert cards[1].back_md == 'Answer B'
     
-    assert cards[2].import_id == 'qc1'
+    assert cards[2].import_id == '1c1'
     # Front includes hierarchy from heading
     assert 'Question C' in cards[2].front_md
     assert cards[2].back_md == 'Answer C'

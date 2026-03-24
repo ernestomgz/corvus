@@ -488,12 +488,29 @@ def _parse_markdown_cards(
         if not front_content:
             j = i - 1
             collected: list[str] = []
+            found_heading = None
             while j >= 0 and lines[j].strip():
-                if HEADING_CAPTURE_PATTERN.match(lines[j]):
+                stripped_line = lines[j].strip()
+                heading_match = HEADING_CAPTURE_PATTERN.match(stripped_line)
+                if heading_match:
+                    # Found a heading - use it as front content and stop looking back
+                    found_heading = stripped_line
                     break
-                collected.insert(0, lines[j].strip())
+                # Skip lines that are pure marker lines (start with a marker)
+                # These are previous cards' markers like "#card id:1234"
+                marker_test = resolver.pattern.search(stripped_line)
+                if marker_test and marker_test.start() == 0:
+                    # Marker is at the beginning of the line - this is a previous card marker
+                    break
+                collected.insert(0, stripped_line)
                 j -= 1
-            front_content = '\n'.join(collected).strip()
+            
+            # Use found heading if available, otherwise use collected lines
+            if found_heading:
+                front_content = found_heading
+            else:
+                front_content = '\n'.join(collected).strip()
+            
             front_content = _clean_front_text(front_content)
             if not front_content and heading_stack:
                 front_content = heading_stack[-1][1]

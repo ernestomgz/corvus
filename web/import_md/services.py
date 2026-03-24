@@ -491,9 +491,6 @@ def _parse_markdown_cards(
             while j >= 0 and lines[j].strip():
                 if HEADING_CAPTURE_PATTERN.match(lines[j]):
                     break
-                # Don't include marker lines from previous cards
-                if resolver.pattern.search(lines[j]):
-                    break
                 collected.insert(0, lines[j].strip())
                 j -= 1
             front_content = '\n'.join(collected).strip()

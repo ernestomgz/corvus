@@ -363,6 +363,7 @@ class Card(models.Model):
     source_path = models.TextField(null=True, blank=True)
     source_anchor = models.TextField(null=True, blank=True)
     media = models.JSONField(default=list)
+    import_id = models.CharField(max_length=16, unique=True, null=True, blank=True, help_text="Hexadecimal import ID")
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -387,12 +388,19 @@ class Card(models.Model):
             self.tags.append(normalised)
             self.save(update_fields=['tags'])
 
-    def remove_tag(self, tag: str) -> None:
-        normalised = tag.strip()
-        if normalised in self.tags:
-            updated = [t for t in self.tags if t != normalised]
-            self.tags = updated
-            self.save(update_fields=['tags'])
+    def save(self, *args, **kwargs):
+        # Auto-assign import_id if not set
+        if self.import_id is None:
+            # Find next available sequential hex ID globally
+            existing_ids = set(Card.objects.filter(import_id__isnull=False).values_list('import_id', flat=True))
+            next_id = 1
+            while True:
+                candidate = hex(next_id)[2:].lower()
+                if candidate not in existing_ids:
+                    self.import_id = candidate
+                    break
+                next_id += 1
+        super().save(*args, **kwargs)
 
 
 class SchedulingState(models.Model):

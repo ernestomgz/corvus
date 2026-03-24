@@ -27,6 +27,7 @@
             <dl class="grid gap-1 text-sm text-gray-600">
                 <div class="flex justify-between"><dt class="font-medium">Type</dt><dd>{{ card.card_type.name }}</dd></div>
                 <div class="flex justify-between"><dt class="font-medium">Tags</dt><dd>{{ card.tags|join:', ' }}</dd></div>
+                {% if card.import_id %}<div class="flex justify-between"><dt class="font-medium">ID</dt><dd class="font-mono">{{ card.import_id }} <button onclick="navigator.clipboard.writeText('{{ card.import_id }}')" class="ml-2 text-xs text-blue-600 hover:text-blue-800" title="Copy ID">📋</button></dd></div>{% endif %}
                 <div class="flex justify-between"><dt class="font-medium">Queue</dt><dd>{{ card.scheduling_state.queue_status }}</dd></div>
                 <div class="flex justify-between"><dt class="font-medium">Due</dt><dd>{{ card.scheduling_state.due_at|date:'Y-m-d H:i' }}</dd></div>
                 <div class="flex justify-between"><dt class="font-medium">Ease</dt><dd>{{ card.scheduling_state.ease }}</dd></div>

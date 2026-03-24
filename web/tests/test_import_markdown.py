@@ -98,6 +98,91 @@ def test_md_obsidian_resized_media_is_found(user_factory, deck_factory, settings
     assert card.media
     assert card.media[0]['url'].startswith(settings.MEDIA_URL)
     assert 'photo' in card.media[0]['name']
+
+
+def test_md_import_id_parsing(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = '## Question\n#card id:1a2b\n\nAnswer'
+    archive = _build_zip({'note.md': markdown})
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    assert record.summary['created'] == 1
+    card = Card.objects.get(user=user)
+    assert card.import_id == '1a2b'
+    assert card.front_md == 'Question'
+    assert card.back_md == 'Answer'
+
+
+def test_md_import_id_auto_generation(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = '#card Question without ID\n\nAnswer'
+    archive = _build_zip({'note.md': markdown})
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    assert record.summary['created'] == 1
+    card = Card.objects.get(user=user)
+    assert card.import_id is not None
+    assert len(card.import_id) > 0
+    # Should be a valid hex number
+    int(card.import_id, 16)
+
+
+def test_md_import_id_update_existing(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    
+    # Create initial card
+    markdown1 = '## Original\n#card id:abc\n\nOriginal answer'
+    archive1 = _build_zip({'note.md': markdown1})
+    record1 = process_markdown_archive(user=user, deck=deck, uploaded_file=archive1)
+    assert record1.summary['created'] == 1
+    card = Card.objects.get(user=user)
+    assert card.import_id == 'abc'
+    assert card.front_md == 'Original'
+    
+    # Update the same card
+    markdown2 = '## Updated\n#card id:abc\n\nUpdated answer'
+    archive2 = _build_zip({'note.md': markdown2})
+    record2 = process_markdown_archive(user=user, deck=deck, uploaded_file=archive2)
+    assert record2.summary['updated'] == 1
+    card.refresh_from_db()
+    assert card.import_id == 'abc'
+    assert card.front_md == 'Updated'
+
+
+def test_md_import_id_conflict_warning(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    
+    # Create first card
+    markdown1 = '#card id:123\n\nFirst answer'
+    archive1 = _build_zip({'note1.md': markdown1})
+    record1 = process_markdown_archive(user=user, deck=deck, uploaded_file=archive1)
+    assert record1.summary['created'] == 1
+    
+    # Try to create second card with same ID
+    markdown2 = '#card id:123\n\nSecond answer'
+    archive2 = _build_zip({'note2.md': markdown2})
+    session = prepare_markdown_session(user=user, deck=deck, uploaded_file=archive2)
+    
+    # Should have a warning about the conflict
+    cards_data = session.payload['cards']
+    assert len(cards_data) == 1
+    card_data = cards_data[0]
+    assert 'already exists' in ' '.join(card_data['warnings'])
+
+
+def test_md_import_id_invalid_format(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = '#card id:invalid\n\nAnswer'
+    archive = _build_zip({'note.md': markdown})
+    session = prepare_markdown_session(user=user, deck=deck, uploaded_file=archive)
+    
+    cards_data = session.payload['cards']
+    assert len(cards_data) == 1
+    card_data = cards_data[0]
+    assert any('Invalid import ID format' in error for error in card_data['errors'])
     assert 'photo.png|200' not in card.back_md
 
 

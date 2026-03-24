@@ -507,3 +507,120 @@ def test_import_updates_merge_tags(user_factory, deck_factory):
     assert record2.summary['updated'] == 1
     card.refresh_from_db()
     assert card.tags == ['math', 'custom', 'spaced']
+
+
+def test_md_same_line_marker_does_not_include_previous_marker(user_factory, deck_factory):
+    """Test that same-line markers don't accidentally include previous card's marker in front_content."""
+    user = user_factory()
+    deck = deck_factory(user=user)
+    
+    # Case from issue: marker on next line, then same-line marker
+    markdown = (
+        "What is the capital of France?\n"
+        "#card id:1234\n"
+        "Paris\n"
+        "\n"
+        "What is the capital of Germany? #card id:1233\n"
+        "Berlin"
+    )
+    archive = _build_zip({'note.md': markdown})
+    session = prepare_markdown_session(user=user, deck=deck, uploaded_file=archive)
+    
+    # Should create 2 cards
+    assert session.total == 2
+    cards_data = session.payload['cards']
+    
+    # First card should have correct front
+    assert cards_data[0]['front_md'] == 'What is the capital of France?'
+    assert cards_data[0]['back_md'] == 'Paris'
+    assert cards_data[0]['import_id'] == '1234'
+    
+    # Second card should NOT include previous marker line
+    # It should be just "What is the capital of Germany?" not "card id:1234\nWhat is the capital of Germany?"
+    assert 'card id:1234' not in cards_data[1]['front_md']
+    assert cards_data[1]['front_md'] == 'What is the capital of Germany?'
+    assert cards_data[1]['back_md'] == 'Berlin'
+    assert cards_data[1]['import_id'] == '1233'
+    
+    # Import should succeed
+    record = apply_markdown_session(session)
+    assert record.summary['created'] == 2
+    
+    # Verify in database
+    cards = Card.objects.filter(user=user).order_by('import_id')
+    assert cards[0].front_md == 'What is the capital of France?'
+    assert cards[1].front_md == 'What is the capital of Germany?'
+    assert 'card id:1234' not in cards[1].front_md
+
+
+def test_md_duplicate_import_ids_in_session_show_errors(user_factory, deck_factory):
+    """Test that duplicate import_ids within the same import session are caught in preview."""
+    user = user_factory()
+    deck = deck_factory(user=user)
+    
+    # Two cards with the same import_id should fail
+    markdown = (
+        "Question 1\n"
+        "#card id:abc123\n"
+        "Answer 1\n"
+        "\n"
+        "Question 2\n"
+        "#card id:abc123\n"
+        "Answer 2"
+    )
+    archive = _build_zip({'note.md': markdown})
+    session = prepare_markdown_session(user=user, deck=deck, uploaded_file=archive)
+    
+    cards_data = session.payload['cards']
+    assert len(cards_data) == 2
+    
+    # Both cards should have errors about duplicate ID
+    error0_text = ' '.join(cards_data[0]['errors'])
+    error1_text = ' '.join(cards_data[1]['errors'])
+    
+    assert 'Duplicate import ID' in error0_text or 'Duplicate import ID' in error1_text
+    
+    # Session should be marked as having errors
+    assert session.payload['summary']['has_errors'] is True
+    
+    # Should not be able to apply with duplicate IDs
+    with pytest.raises(MarkdownImportError):
+        apply_markdown_session(session)
+
+
+def test_md_both_marker_positions_with_ids_work_correctly(user_factory, deck_factory):
+    """Test both marker positions (same-line and next-line) work correctly with IDs."""
+    user = user_factory()
+    deck = deck_factory(user=user)
+    
+    # Mix of both marker positions
+    markdown = (
+        "### Section 1\n"
+        "Question A #card id:qa1\n"
+        "Answer A\n"
+        "\n"
+        "Question B\n"
+        "#card id:qb1\n"
+        "Answer B\n"
+        "\n"
+        "### Question C #card id:qc1\n"
+        "Answer C"
+    )
+    archive = _build_zip({'note.md': markdown})
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    
+    assert record.summary['created'] == 3
+    
+    cards = Card.objects.filter(user=user).order_by('import_id')
+    assert cards[0].import_id == 'qa1'
+    assert cards[0].front_md == 'Question A'
+    assert cards[0].back_md == 'Answer A'
+    
+    assert cards[1].import_id == 'qb1'
+    assert cards[1].front_md == 'Question B'
+    assert cards[1].back_md == 'Answer B'
+    
+    assert cards[2].import_id == 'qc1'
+    # Front includes hierarchy from heading
+    assert 'Question C' in cards[2].front_md
+    assert cards[2].back_md == 'Answer C'

@@ -4,7 +4,8 @@ This file demonstrates all the fields that can be extracted during markdown impo
 
 ## Basic Card Structure
 
-### What is the capital of France? #card
+### What is the capital of France?
+#card id:1234
 Paris
 
 ### What is 2 + 2? #card
@@ -159,8 +160,6 @@ It can span multiple paragraphs and include various formatting.
 - *Italic text*
 
 All of this content will be included in the back_md field.
-
-## Long Card Example (#long-card)
 
 # Science
 ## Physics

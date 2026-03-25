@@ -646,7 +646,10 @@ def test_md_both_marker_positions_with_ids_work_correctly(user_factory, deck_fac
     assert cards[1].back_md == 'Answer B'
     
     assert cards[2].import_id == '1c1'
-    # Front includes hierarchy from heading
     assert 'Question C' in cards[2].front_md
-    assert 'Section 1' not in cards[2].front_md
     assert cards[2].back_md == 'Answer C'
+    # Should not include "Section 1" because marker is on same line as heading, so it should reset hierarchy context
+    assert 'Section 1' not in cards[2].front_md
+    # Previous cards' ids should not be in this card
+    assert 'id:1a1' not in cards[2].front_md
+    assert 'id:1b1' not in cards[2].front_md

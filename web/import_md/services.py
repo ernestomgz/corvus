@@ -738,6 +738,11 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
     
     # Generate sequential IDs for cards without explicit IDs
     used_ids = set(Card.objects.filter(import_id__isnull=False).values_list('import_id', flat=True))
+    # Include explicit IDs from this import in blocked IDs to avoid conflicts within one batch
+    for card in parsed_cards:
+        if card.import_id:
+            used_ids.add(card.import_id)
+
     for card in parsed_cards:
         if not card.import_id:
             # Find next available sequential hex ID

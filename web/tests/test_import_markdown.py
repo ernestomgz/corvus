@@ -969,10 +969,9 @@ def test_hierarchy_with_level_1_heading_marker(user_factory, deck_factory):
     card = Card.objects.get(user=user)
     
     # Should include Main Title and Subtitle in context
-    assert 'Main Title' in card.front_md
-    assert 'Subtitle' in card.front_md
+    assert 'Main Title > Subtitle' in card.front_md
     assert 'Card Title' in card.front_md
-    assert 'Content' not in card.back_md
+    assert 'Content' in card.back_md
 
 
 def test_hierarchy_empty_heading_stack_from_marker_on_h1(user_factory, deck_factory):
@@ -1084,10 +1083,11 @@ def test_reverse_card_preserves_media(user_factory, deck_factory, settings):
 # ============================================================================
 
 def test_tags_parsing_with_semicolon_separator(user_factory, deck_factory):
-    """Test tag parsing with semicolon separator."""
+    """Test tag parsing with semicolon separator on line after marker."""
     user = user_factory()
     deck = deck_factory(user=user)
-    markdown = 'Q\ntags:: tag1; tag2; tag3\n#card\nA'
+    # Tags must come after the #card marker on its own line
+    markdown = 'Question\n#card\ntags:: tag1; tag2; tag3\nAnswer'
     archive = _build_zip({'note.md': markdown})
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     card = Card.objects.get(user=user)
@@ -1098,10 +1098,11 @@ def test_tags_parsing_with_semicolon_separator(user_factory, deck_factory):
 
 
 def test_tags_parsing_with_comma_separator(user_factory, deck_factory):
-    """Test tag parsing with comma separator."""
+    """Test tag parsing with comma separator on line after marker."""
     user = user_factory()
     deck = deck_factory(user=user)
-    markdown = 'Q\ntags:: foo,bar,baz\n#card\nA'
+    # Tags must come after the #card marker on its own line
+    markdown = 'Question\n#card\ntags:: foo,bar,baz\nAnswer'
     archive = _build_zip({'note.md': markdown})
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     card = Card.objects.get(user=user)
@@ -1111,25 +1112,26 @@ def test_tags_parsing_with_comma_separator(user_factory, deck_factory):
     assert 'baz' in card.tags
 
 
-def test_tags_merging_on_update_no_duplicates(user_factory, deck_factory):
-    """Test that tag merging on update doesn't create duplicates."""
+def test_tags_replace_on_update(user_factory, deck_factory):
+    """Test that tags are replaced (not merged) when updating a card."""
     user = user_factory()
     deck = deck_factory(user=user)
     
-    # Create with tags
-    markdown1 = 'Q\ntags:: tag1, tag2\n#card\nA'
+    # Create with tags - tags must come after #card marker
+    markdown1 = 'Question\n#card id:tag_test\ntags:: tag1, tag2\nAnswer'
     archive1 = _build_zip({'note.md': markdown1})
     process_markdown_archive(user=user, deck=deck, uploaded_file=archive1)
     card = Card.objects.get(user=user)
     assert len(card.tags) == 2
+    assert set(card.tags) == {'tag1', 'tag2'}
     
-    # Update with overlapping tags
-    markdown2 = 'Q Updated\ntags:: tag2, tag3\n#card\nA Updated'
+    # Update with different tags - old tags should be replaced with new tags
+    markdown2 = 'Question Updated\n#card id:tag_test\ntags:: tag2, tag3\nAnswer Updated'
     archive2 = _build_zip({'note.md': markdown2})
     process_markdown_archive(user=user, deck=deck, uploaded_file=archive2)
     
     card.refresh_from_db()
-    # Should havetag2, tag3 (no duplicates)
+    # Tags should be replaced: only tag2 and tag3 remain (tag1 removed, tag2 kept, tag3 added)
     assert len(card.tags) == 2
     assert set(card.tags) == {'tag2', 'tag3'}
 

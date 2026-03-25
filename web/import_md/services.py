@@ -417,10 +417,13 @@ def _update_heading_stack(line: str, stack: list[tuple[int, str]], clean_pattern
     stripped_line = line.strip()
     title_only = (match.group('title') or '').strip()
     marker_candidate = f"#{title_only.lstrip('#')}" if title_only else ''
-    if stripped_line and clean_pattern.fullmatch(stripped_line):
+    
+    # Skip if this line looks like it contains a card marker (not a real heading)
+    if stripped_line and clean_pattern.search(stripped_line):
         return None
-    if marker_candidate and clean_pattern.fullmatch(marker_candidate):
+    if marker_candidate and clean_pattern.search(marker_candidate):
         return None
+    
     level = len(match.group('hashes'))
     title = clean_pattern.sub('', title_only)
     cleaned = _clean_front_text(title)
@@ -493,23 +496,24 @@ def _parse_markdown_cards(
                 stripped_line = lines[j].strip()
                 heading_match = HEADING_CAPTURE_PATTERN.match(stripped_line)
                 if heading_match:
-                    # Found a heading - use it as front content and stop looking back
-                    found_heading = stripped_line
-                    break
-                # Skip lines that are pure marker lines (start with a marker)
-                # These are previous cards' markers like "#card id:1234"
+                    # Found a heading - skip it and continue looking back for actual content
+                    # (headings are context, not used as front content in lookback)
+                    j -= 1
+                    continue
+                # Skip lines that are pure marker lines (contain a marker at any position)
+                # These are previous cards' markers like "#card id:1234" or "Question #card id:1234"
                 marker_test = resolver.pattern.search(stripped_line)
-                if marker_test and marker_test.start() == 0:
-                    # Marker is at the beginning of the line - this is a previous card marker
+                if marker_test:
+                    # Any line with a marker is likely a previous card - stop looking back
                     break
                 collected.insert(0, stripped_line)
                 j -= 1
             
-            # Use found heading if available, otherwise use collected lines
-            if found_heading:
-                front_content = found_heading
-            else:
+            # Use collected lines if available, otherwise use empty
+            if collected:
                 front_content = '\n'.join(collected).strip()
+            else:
+                front_content = ''
             
             front_content = _clean_front_text(front_content)
             if not front_content and heading_stack:

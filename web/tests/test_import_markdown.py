@@ -636,14 +636,17 @@ def test_md_both_marker_positions_with_ids_work_correctly(user_factory, deck_fac
     
     cards = Card.objects.filter(user=user).order_by('import_id')
     assert cards[0].import_id == '1a1'
-    assert cards[0].front_md == 'Question A'
+    assert 'Section 1' in cards[0].front_md
+    assert 'Question A' in cards[0].front_md
     assert cards[0].back_md == 'Answer A'
     
     assert cards[1].import_id == '1b1'
-    assert cards[1].front_md == 'Question B'
+    assert 'Section 1' in cards[1].front_md
+    assert 'Question B' in cards[1].front_md
     assert cards[1].back_md == 'Answer B'
     
     assert cards[2].import_id == '1c1'
     # Front includes hierarchy from heading
     assert 'Question C' in cards[2].front_md
+    assert 'Section 1' not in cards[2].front_md
     assert cards[2].back_md == 'Answer C'

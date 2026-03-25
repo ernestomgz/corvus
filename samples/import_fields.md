@@ -4,7 +4,8 @@ This file demonstrates all the fields that can be extracted during markdown impo
 
 ## Basic Card Structure
 
-### What is the capital of France? #card
+### What is the capital of France?
+#card id:1234
 Paris
 
 ### What is 2 + 2? #card
@@ -159,3 +160,25 @@ It can span multiple paragraphs and include various formatting.
 - *Italic text*
 
 All of this content will be included in the back_md field.
+
+# Science
+## Physics
+### Energy concept
+#long-card id:123
+the law of conservation of energy states that energy cannot be created or destroyed, only transformed.
+
+This is a second paragraph of explanation.
+
+```
+E = mc^2
+
+# not a marker, just a blank line inside code block is allowed
+
+
+```
+
+Final wrap-up paragraph.
+
+
+
+*Note:* two consecutive blank lines terminate the `#long-card` content, and they are not part of the imported back text.

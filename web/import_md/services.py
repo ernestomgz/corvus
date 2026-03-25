@@ -7,6 +7,7 @@ import json
 import re
 import zipfile
 import difflib
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -27,7 +28,7 @@ MEDIA_WIKI_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ID_PATTERN = re.compile(r'^\s*id::\s*(?P<id>[\w:-]+)', re.IGNORECASE)
-IMPORT_ID_PATTERN = re.compile(r'#card\s+id:([a-f0-9]+)', re.IGNORECASE)
+IMPORT_ID_PATTERN = re.compile(r'(?<!\w)(?:#card|#long-card)\s+id:([^\s]+)', re.IGNORECASE)
 TAGS_PATTERN = re.compile(r'^\s*tags::\s*(?P<tags>.+)$', re.IGNORECASE)
 MEDIA_PATTERN = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
 HEADING_PATTERN = re.compile(r'^\s*#+\s*')
@@ -200,6 +201,9 @@ def _merge_tags(existing: list[str] | None, incoming: list[str] | None) -> list[
 
 
 def _build_marker_resolver(user) -> MarkerResolver:
+    from core.services.card_types import ensure_builtin_card_types
+    ensure_builtin_card_types()
+    
     formats = (
         CardImportFormat.objects.select_related('card_type')
         .filter(format_kind='markdown')
@@ -413,10 +417,13 @@ def _update_heading_stack(line: str, stack: list[tuple[int, str]], clean_pattern
     stripped_line = line.strip()
     title_only = (match.group('title') or '').strip()
     marker_candidate = f"#{title_only.lstrip('#')}" if title_only else ''
-    if stripped_line and clean_pattern.fullmatch(stripped_line):
+    
+    # Skip if this line looks like it contains a card marker (not a real heading)
+    if stripped_line and clean_pattern.search(stripped_line):
         return None
-    if marker_candidate and clean_pattern.fullmatch(marker_candidate):
+    if marker_candidate and clean_pattern.search(marker_candidate):
         return None
+    
     level = len(match.group('hashes'))
     title = clean_pattern.sub('', title_only)
     cleaned = _clean_front_text(title)
@@ -471,16 +478,43 @@ def _parse_markdown_cards(
         import_id_match = IMPORT_ID_PATTERN.search(line)
         if import_id_match:
             import_id = import_id_match.group(1).lower()
-            # Remove the id part from front_content if it was there
-            front_content = IMPORT_ID_PATTERN.sub('', front_content).strip()
+            # If front_content is just the ID part, remove it
+            if front_content and front_content.lower().startswith('id:'):
+                front_content = ''
+        elif front_after and front_after.lower().startswith('id:'):
+            # Handle inline id: syntax without full marker pattern
+            id_match = re.match(r'id:([a-f0-9]+)', front_after, re.IGNORECASE)
+            if id_match:
+                import_id = id_match.group(1).lower()
+                front_content = front_before  # Remove the id part from front_content
 
         if not front_content:
             j = i - 1
             collected: list[str] = []
+            found_heading = None
             while j >= 0 and lines[j].strip():
-                collected.insert(0, lines[j].strip())
+                stripped_line = lines[j].strip()
+                heading_match = HEADING_CAPTURE_PATTERN.match(stripped_line)
+                if heading_match:
+                    # Found a heading - skip it and continue looking back for actual content
+                    # (headings are context, not used as front content in lookback)
+                    j -= 1
+                    continue
+                # Skip lines that are pure marker lines (contain a marker at any position)
+                # These are previous cards' markers like "#card id:1234" or "Question #card id:1234"
+                marker_test = resolver.pattern.search(stripped_line)
+                if marker_test:
+                    # Any line with a marker is likely a previous card - stop looking back
+                    break
+                collected.insert(0, stripped_line)
                 j -= 1
-            front_content = '\n'.join(collected).strip()
+            
+            # Use collected lines if available, otherwise use empty
+            if collected:
+                front_content = '\n'.join(collected).strip()
+            else:
+                front_content = ''
+            
             front_content = _clean_front_text(front_content)
             if not front_content and heading_stack:
                 front_content = heading_stack[-1][1]
@@ -513,12 +547,52 @@ def _parse_markdown_cards(
             i += 1
 
         back_lines: list[str] = []
+        long_card_mode = marker_text == '#long-card' or (rule and rule.token.lower() == '#long-card')
+        in_fenced_block = False
+        fence_delim = ''
+        consecutive_blank = 0
+
         while i < len(lines):
             candidate = lines[i]
-            if not candidate.strip():
+            stripped_line = candidate.strip()
+
+            # Detect fenced code block markers to ignore blank-line termination inside code blocks
+            if stripped_line.startswith('```') or stripped_line.startswith('~~~'):
+                current_delim = stripped_line[:3]
+                if not in_fenced_block:
+                    in_fenced_block = True
+                    fence_delim = current_delim
+                elif current_delim == fence_delim:
+                    in_fenced_block = False
+                    fence_delim = ''
+
+            # New marker starts next card (unless inside fenced block)
+            if not in_fenced_block and resolver.pattern.search(candidate):
                 break
-            if resolver.pattern.search(candidate):
-                break
+
+            if not long_card_mode:
+                if not stripped_line:
+                    break
+                back_lines.append(candidate)
+                i += 1
+                continue
+
+            # Long-card mode: allow single blank lines inside back content
+            if not stripped_line and not in_fenced_block:
+                consecutive_blank += 1
+                if consecutive_blank >= 2:
+                    i += 1
+                    break
+                back_lines.append('')
+                i += 1
+                continue
+
+            if not stripped_line and in_fenced_block:
+                back_lines.append(candidate)
+                i += 1
+                continue
+
+            consecutive_blank = 0
             back_lines.append(candidate)
             i += 1
 
@@ -648,6 +722,13 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
     
     # Handle import IDs
     import_ids = [card.import_id for card in parsed_cards if card.import_id]
+    
+    # Check for duplicate import IDs within this session
+    import_id_counts = Counter(import_ids)
+    for card in parsed_cards:
+        if card.import_id and import_id_counts[card.import_id] > 1:
+            card.errors.append(f"Import ID '{card.import_id}' is used by multiple cards in this import. Each card must have a unique import ID.")
+    
     existing_import_id_map = {}
     if import_ids:
         existing_import_id_map = {
@@ -657,6 +738,11 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
     
     # Generate sequential IDs for cards without explicit IDs
     used_ids = set(Card.objects.filter(import_id__isnull=False).values_list('import_id', flat=True))
+    # Include explicit IDs from this import in blocked IDs to avoid conflicts within one batch
+    for card in parsed_cards:
+        if card.import_id:
+            used_ids.add(card.import_id)
+
     for card in parsed_cards:
         if not card.import_id:
             # Find next available sequential hex ID
@@ -674,6 +760,19 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
                 int(card.import_id, 16)
             except ValueError:
                 card.errors.append(f"Invalid import ID format: '{card.import_id}'. Must be hexadecimal.")
+    
+    # Detect duplicate import_ids within this import session
+    import_id_counts: dict[str, list[int]] = {}
+    for idx, card in enumerate(parsed_cards):
+        if card.import_id:
+            import_id_counts.setdefault(card.import_id, []).append(idx)
+    
+    for import_id, indices in import_id_counts.items():
+        if len(indices) > 1:
+            for idx in indices:
+                parsed_cards[idx].errors.append(
+                    f"Duplicate import ID '{import_id}' found in this import (also used in card at index {[i for i in indices if i != idx]}). Each card must have a unique ID."
+                )
     
     external_keys = [card.external_key for card in parsed_cards]
     existing_map = {

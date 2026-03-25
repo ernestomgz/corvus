@@ -173,6 +173,26 @@ BUILTIN_CARD_TYPES = [
         ],
     },
     {
+        'slug': 'long-card',
+        'name': 'Long Card',
+        'description': 'Front/back Markdown note with multi-paragraph long back content',
+        'field_schema': list(_DEFAULT_FRONT_BACK_SCHEMA),
+        'front_template': '{{hierarchy}}\n{{title}}',
+        'back_template': '{{back}}',
+        'formats': [
+            {
+                'name': 'Long card marker',
+                'template': '{{hierarchy}}\n{{title}} #long-card\n{{back}}',
+                'options': {'marker': '#long-card'},
+            },
+            {
+                'name': 'Long card line marker',
+                'template': '{{hierarchy}}\n{{title}}\n#long-card\n{{back}}',
+                'options': {'marker': '#long-card'},
+            },
+        ],
+    },
+    {
         'slug': 'basic_image_front',
         'name': 'Basic (Image on Front)',
         'description': 'Front/back card optimized for media on front',

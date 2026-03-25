@@ -1118,7 +1118,7 @@ def test_tags_replace_on_update(user_factory, deck_factory):
     deck = deck_factory(user=user)
     
     # Create with tags - tags must come after #card marker
-    markdown1 = 'Question\n#card id:tag_test\ntags:: tag1, tag2\nAnswer'
+    markdown1 = 'Question\n#card id:1a1a\ntags:: tag1, tag2\nAnswer'
     archive1 = _build_zip({'note.md': markdown1})
     process_markdown_archive(user=user, deck=deck, uploaded_file=archive1)
     card = Card.objects.get(user=user)
@@ -1126,7 +1126,7 @@ def test_tags_replace_on_update(user_factory, deck_factory):
     assert set(card.tags) == {'tag1', 'tag2'}
     
     # Update with different tags - old tags should be replaced with new tags
-    markdown2 = 'Question Updated\n#card id:tag_test\ntags:: tag2, tag3\nAnswer Updated'
+    markdown2 = 'Question Updated\n#card id:1a1a\ntags:: tag2, tag3\nAnswer Updated'
     archive2 = _build_zip({'note.md': markdown2})
     process_markdown_archive(user=user, deck=deck, uploaded_file=archive2)
     
@@ -1330,7 +1330,7 @@ def test_short_card_terminated_by_single_blank_line(user_factory, deck_factory):
         "# Heading 1\n"
         "## Heading 2\n"
         "#card\n"
-        "Front text here.\n"
+        "Back text here.\n"
         "\n"  # Single blank line terminates short card
         "This should not be in the card.\n"
         "External content after.\n"
@@ -1347,7 +1347,7 @@ def test_short_card_terminated_by_single_blank_line(user_factory, deck_factory):
     card = Card.objects.get(user=user)
     
     # Card only has front, no back content (terminated by blank line)
-    assert 'Front text here' in card.front_md
+    assert 'Back text here' in card.back_md
     
     # Everything after the single blank line should NOT be in the card
     assert 'This should not' not in card.back_md
@@ -1543,3 +1543,99 @@ def test_mixed_long_and_short_cards_different_blank_line_behavior(user_factory, 
     # Second card: short card
     assert 'Short card line' in cards[1].back_md
     assert 'External text 2' not in cards[1].back_md
+
+
+def test_long_card_with_code_block_and_external_text_no_ghost_regression(user_factory, deck_factory):
+    """
+    Regression test: Replicate issue from samples/import_fields.md (lines 164-184).
+    Long card with paragraphs, blank lines, and code block should not create
+    a ghost card from external text after double blank lines.
+    """
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        "# Title 1\n"
+        "## Title 2\n"
+        "### Subtopic\n"
+        "#long-card id:card1\n"
+        "First paragraph of content.\n"
+        "\n"
+        "Second paragraph of explanation.\n"
+        "\n"
+        "```\n"
+        "code line 1\n"
+        "\n"
+        "code line 2\n"
+        "```\n"
+        "\n"
+        "Final paragraph.\n"
+        "\n"
+        "\n"  # Double blank terminates
+        "*Note:* This external text should not create a ghost card.\n"
+        "It appears after the double blank line boundary."
+    )
+    archive = _build_zip({'notes.md': markdown})
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    
+    # Must create exactly ONE card, not two
+    assert record.summary['created'] == 1
+    card = Card.objects.get(user=user)
+    
+    # Card should include all content up to double blank
+    assert 'First paragraph' in card.back_md
+    assert 'Second paragraph' in card.back_md
+    assert '```' in card.back_md
+    assert 'code line 1' in card.back_md
+    assert 'code line 2' in card.back_md
+    assert 'Final paragraph' in card.back_md
+    
+    # Must NOT create a ghost card with external text
+    assert '*Note:*' not in card.back_md
+    assert 'This external text' not in card.back_md
+    assert 'appears after' not in card.back_md
+
+
+def test_long_card_code_block_with_blank_lines_and_external_text_no_ghost(user_factory, deck_factory):
+    """
+    Regression variant: Long card with code block containing blank lines,
+    followed by double blank lines and external text.
+    External text must not become a ghost card.
+    """
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        "# Section\n"
+        "## Subsection\n"
+        "#long-card id:card2\n"
+        "Intro line.\n"
+        "\n"
+        "```\n"
+        "function test() {\n"
+        "\n"
+        "    return true;\n"
+        "}\n"
+        "```\n"
+        "\n"
+        "Post code explanation.\n"
+        "\n"
+        "\n"  # Double blank terminates
+        "External documentation line 1.\n"
+        "External documentation line 2."
+    )
+    archive = _build_zip({'notes.md': markdown})
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    
+    # Must create exactly ONE card, not two
+    assert record.summary['created'] == 1
+    card = Card.objects.get(user=user)
+    
+    # Card should have complete code example
+    assert 'Intro line' in card.back_md
+    assert '```' in card.back_md
+    assert 'function test' in card.back_md
+    assert 'return true' in card.back_md
+    assert 'Post code explanation' in card.back_md
+    
+    # Card should NOT include external documentation
+    assert 'External documentation' not in card.back_md
+    assert 'line 1' not in card.back_md or 'External' not in card.back_md

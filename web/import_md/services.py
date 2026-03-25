@@ -417,13 +417,13 @@ def _update_heading_stack(line: str, stack: list[tuple[int, str]], clean_pattern
     stripped_line = line.strip()
     title_only = (match.group('title') or '').strip()
     marker_candidate = f"#{title_only.lstrip('#')}" if title_only else ''
-    
-    # Skip if this line looks like it contains a card marker (not a real heading)
-    if stripped_line and clean_pattern.search(stripped_line):
+
+    # Skip pure marker lines as headings (e.g. "#card", "#long-card")
+    if stripped_line and clean_pattern.fullmatch(stripped_line):
         return None
-    if marker_candidate and clean_pattern.search(marker_candidate):
+    if marker_candidate and clean_pattern.fullmatch(marker_candidate):
         return None
-    
+
     level = len(match.group('hashes'))
     title = clean_pattern.sub('', title_only)
     cleaned = _clean_front_text(title)

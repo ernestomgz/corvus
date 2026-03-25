@@ -481,7 +481,7 @@ def test_import_long_card_with_id_and_heading_context_and_update(user_factory, d
     assert record2.summary['updated'] == 1
     card.refresh_from_db()
     assert 'id:123' not in card.back_md
-    assert 'Updated answer paragraph' in card.back_md
+    assert 'Updated again answer paragraph' in card.back_md
 
 
 def test_import_long_card_supports_fenced_code_block_blank_lines(user_factory, deck_factory):

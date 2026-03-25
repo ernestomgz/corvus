@@ -488,11 +488,13 @@ def _parse_markdown_cards(
         if not front_content:
             j = i - 1
             collected: list[str] = []
+            found_heading = None
             while j >= 0 and lines[j].strip():
                 stripped_line = lines[j].strip()
-                # Stop at heading - don't include it in front_content
-                # (headings are tracked in heading_stack for hierarchy)
-                if HEADING_CAPTURE_PATTERN.match(stripped_line):
+                heading_match = HEADING_CAPTURE_PATTERN.match(stripped_line)
+                if heading_match:
+                    # Found a heading - use it as front content and stop looking back
+                    found_heading = stripped_line
                     break
                 # Skip lines that are pure marker lines (start with a marker)
                 # These are previous cards' markers like "#card id:1234"
@@ -503,10 +505,14 @@ def _parse_markdown_cards(
                 collected.insert(0, stripped_line)
                 j -= 1
             
-            front_content = '\n'.join(collected).strip()
+            # Use found heading if available, otherwise use collected lines
+            if found_heading:
+                front_content = found_heading
+            else:
+                front_content = '\n'.join(collected).strip()
+            
             front_content = _clean_front_text(front_content)
             if not front_content and heading_stack:
-                # No preceding text found, use the last heading as fallback
                 front_content = heading_stack[-1][1]
         i += 1
         anchor = None
@@ -594,15 +600,10 @@ def _parse_markdown_cards(
 
         if heading_level is not None:
             context_titles = [title for level, title in heading_stack if level < heading_level]
-        elif marker_start == 0:
-            # Marker is on its own line - include heading context
+        else:
             context_titles = [title for _level, title in heading_stack]
             if context_titles and context_titles[-1].strip().lower() == front_content.strip().lower():
                 context_titles = context_titles[:-1]
-        else:
-            # Marker is inline - don't include heading context in front_md
-            # (it's still tracked in heading_stack for reference, but not included here)
-            context_titles = []
         context_md = ' > '.join([title for title in context_titles if title])
 
         front_md, media_front, missing_front = _rewrite_media_links(

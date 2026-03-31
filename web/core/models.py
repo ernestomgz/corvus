@@ -155,9 +155,9 @@ class StudySet(models.Model):
         constraints = [
             models.CheckConstraint(
                 check=(
-                    models.Q(kind='deck', deck__isnull=False, decks__isnull=True, tags__len=0, filenames__len=0)
-                    | models.Q(kind='tag', deck__isnull=True, tag__gt='', decks__isnull=True, tags__len=0, filenames__len=0)
-                    | models.Q(kind='custom', deck__isnull=True, tag='', decks__isnull=False, tags__isnull=False, filenames__isnull=False)
+                    models.Q(kind='deck', deck__isnull=False, tag='')
+                    | models.Q(kind='tag', deck__isnull=True, tag__gt='')
+                    | models.Q(kind='custom', deck__isnull=True, tag='')
                 ),
                 name='study_set_kind_constraints',
             ),

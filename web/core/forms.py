@@ -54,18 +54,22 @@ class DeckForm(forms.ModelForm):
 class StudySetForm(forms.ModelForm):
     class Meta:
         model = StudySet
-        fields = ['name', 'decks', 'tags', 'filenames']
+        fields = ['name', 'kind', 'deck', 'tag', 'decks', 'tags', 'filenames']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'w-full border rounded p-2'}),
-            'decks': forms.SelectMultiple(attrs={'class': 'w-full border rounded p-2'}),
-            'tags': forms.SelectMultiple(attrs={'class': 'w-full border rounded p-2'}),
-            'filenames': forms.SelectMultiple(attrs={'class': 'w-full border rounded p-2'}),
+            'kind': forms.RadioSelect(attrs={'class': 'flex gap-4 text-sm'}),
+            'deck': forms.Select(attrs={'class': 'w-full border rounded p-2'}),
+            'tag': forms.TextInput(attrs={'class': 'w-full border rounded p-2', 'placeholder': 'e.g. physics'}),
+            'decks': forms.CheckboxSelectMultiple(attrs={'class': 'space-y-1'}),
+            'tags': forms.CheckboxSelectMultiple(attrs={'class': 'space-y-1'}),
+            'filenames': forms.CheckboxSelectMultiple(attrs={'class': 'space-y-1'}),
         }
 
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.user = user
         if user is not None:
+            self.fields['deck'].queryset = Deck.objects.for_user(user).order_by('name')
             self.fields['decks'].queryset = Deck.objects.for_user(user).order_by('name')
             # Populate tags from user's cards
             user_tags = Card.objects.for_user(user).values_list('tags', flat=True)
@@ -77,39 +81,41 @@ class StudySetForm(forms.ModelForm):
             user_filenames = Card.objects.for_user(user).exclude(source_path__isnull=True).values_list('source_path', flat=True).distinct()
             self.fields['filenames'].choices = [(fn, fn) for fn in sorted(user_filenames)]
         else:
+            self.fields['deck'].queryset = Deck.objects.none()
             self.fields['decks'].queryset = Deck.objects.none()
             self.fields['tags'].choices = []
             self.fields['filenames'].choices = []
+        self.fields['deck'].required = False
+        self.fields['tag'].required = False
+        self.fields['decks'].required = False
+        self.fields['tags'].required = False
+        self.fields['filenames'].required = False
 
     def clean(self):
         cleaned = super().clean()
+        kind = cleaned.get('kind')
+        deck = cleaned.get('deck')
+        tag = (cleaned.get('tag') or '').strip()
         decks = cleaned.get('decks') or []
         tags = cleaned.get('tags') or []
         filenames = cleaned.get('filenames') or []
         name = (cleaned.get('name') or '').strip()
-
-        # Determine kind based on selections
-        if len(decks) == 1 and not tags and not filenames:
-            cleaned['kind'] = StudySet.KIND_DECK
-            cleaned['deck'] = decks[0]
-            cleaned['tag'] = ''
-        elif not decks and len(tags) == 1 and not filenames:
-            cleaned['kind'] = StudySet.KIND_TAG
-            cleaned['deck'] = None
-            cleaned['tag'] = tags[0]
-        else:
-            cleaned['kind'] = StudySet.KIND_CUSTOM
-            cleaned['deck'] = None
-            cleaned['tag'] = ''
+        if kind == StudySet.KIND_DECK:
+            if not deck:
+                self.add_error('deck', 'Select a deck to study.')
+            elif not name:
+                cleaned['name'] = deck.full_path()
+        elif kind == StudySet.KIND_TAG:
+            if not tag:
+                self.add_error('tag', 'Enter a tag to study.')
+            else:
+                cleaned['tag'] = tag
+                if not name:
+                    cleaned['name'] = f"Tag: {tag}"
+        elif kind == StudySet.KIND_CUSTOM:
             if not decks and not tags and not filenames:
                 self.add_error(None, 'Select at least one deck, tag, or filename.')
-
-        if not name:
-            if cleaned['kind'] == StudySet.KIND_DECK:
-                cleaned['name'] = cleaned['deck'].full_path()
-            elif cleaned['kind'] == StudySet.KIND_TAG:
-                cleaned['name'] = f"Tag: {cleaned['tag']}"
-            else:
+            if not name:
                 parts = []
                 if decks:
                     parts.append(f"{len(decks)} deck{'s' if len(decks) > 1 else ''}")
@@ -118,14 +124,12 @@ class StudySetForm(forms.ModelForm):
                 if filenames:
                     parts.append(f"{len(filenames)} file{'s' if len(filenames) > 1 else ''}")
                 cleaned['name'] = f"Custom: {', '.join(parts)}"
-
+        else:
+            self.add_error('kind', 'Choose how you want to study.')
         return cleaned
 
     def save(self, commit: bool = True):
         study_set = super().save(commit=False)
-        study_set.kind = self.cleaned_data['kind']
-        study_set.deck = self.cleaned_data.get('deck')
-        study_set.tag = self.cleaned_data.get('tag')
         if self.user is not None:
             study_set.user = self.user
         if commit:

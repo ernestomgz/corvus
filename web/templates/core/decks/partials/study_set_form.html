@@ -6,29 +6,94 @@
             {{ study_set_form.name }}
             {% if study_set_form.name.errors %}<p class="text-xs text-red-600">{{ study_set_form.name.errors.0 }}</p>{% endif %}
         </div>
-        <div class="space-y-2">
-            <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Select what to study</p>
+        <div class="space-y-1">
+            <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Preset type</p>
+            <div class="space-y-1 text-sm text-gray-700">
+                {{ study_set_form.kind }}
+            </div>
+            {% if study_set_form.kind.errors %}<p class="text-xs text-red-600">{{ study_set_form.kind.errors.0 }}</p>{% endif %}
+        </div>
+        <div id="deck-field" class="space-y-1" style="display: none;">
+            {{ study_set_form.deck.label_tag }}
+            {{ study_set_form.deck }}
+            {% if study_set_form.deck.errors %}<p class="text-xs text-red-600">{{ study_set_form.deck.errors.0 }}</p>{% endif %}
+        </div>
+        <div id="tag-field" class="space-y-1" style="display: none;">
+            {{ study_set_form.tag.label_tag }}
+            {{ study_set_form.tag }}
+            {% if study_set_form.tag.errors %}<p class="text-xs text-red-600">{{ study_set_form.tag.errors.0 }}</p>{% endif %}
+        </div>
+        <div id="custom-fields" class="space-y-1" style="display: none;">
+            <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Select decks, tags, or files (use search to filter)</p>
             <div class="space-y-2">
                 <div>
                     {{ study_set_form.decks.label_tag }}
-                    {{ study_set_form.decks }}
+                    <input type="text" placeholder="Search decks..." class="search-input w-full border rounded p-2 mb-1" data-target="decks-container">
+                    <div id="decks-container" class="max-h-32 overflow-y-auto border rounded p-2 bg-white">
+                        {{ study_set_form.decks }}
+                    </div>
                     {% if study_set_form.decks.errors %}<p class="text-xs text-red-600">{{ study_set_form.decks.errors.0 }}</p>{% endif %}
                 </div>
                 <div>
                     {{ study_set_form.tags.label_tag }}
-                    {{ study_set_form.tags }}
+                    <input type="text" placeholder="Search tags..." class="search-input w-full border rounded p-2 mb-1" data-target="tags-container">
+                    <div id="tags-container" class="max-h-32 overflow-y-auto border rounded p-2 bg-white">
+                        {{ study_set_form.tags }}
+                    </div>
                     {% if study_set_form.tags.errors %}<p class="text-xs text-red-600">{{ study_set_form.tags.errors.0 }}</p>{% endif %}
                 </div>
                 <div>
                     {{ study_set_form.filenames.label_tag }}
-                    {{ study_set_form.filenames }}
+                    <input type="text" placeholder="Search files..." class="search-input w-full border rounded p-2 mb-1" data-target="filenames-container">
+                    <div id="filenames-container" class="max-h-32 overflow-y-auto border rounded p-2 bg-white">
+                        {{ study_set_form.filenames }}
+                    </div>
                     {% if study_set_form.filenames.errors %}<p class="text-xs text-red-600">{{ study_set_form.filenames.errors.0 }}</p>{% endif %}
                 </div>
             </div>
-            {% if study_set_form.non_field_errors %}<p class="text-xs text-red-600">{{ study_set_form.non_field_errors.0 }}</p>{% endif %}
         </div>
-        <button type="submit" class="w-full rounded bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800">Create study set</button>
+        <button type="submit" class="w-full rounded bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800">Save preset</button>
     </form>
+    <script>
+        document.querySelectorAll('input[name="kind"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                const deckField = document.getElementById('deck-field');
+                const tagField = document.getElementById('tag-field');
+                const customFields = document.getElementById('custom-fields');
+                if (this.value === 'deck') {
+                    deckField.style.display = 'block';
+                    tagField.style.display = 'none';
+                    customFields.style.display = 'none';
+                } else if (this.value === 'tag') {
+                    deckField.style.display = 'none';
+                    tagField.style.display = 'block';
+                    customFields.style.display = 'none';
+                } else if (this.value === 'custom') {
+                    deckField.style.display = 'none';
+                    tagField.style.display = 'none';
+                    customFields.style.display = 'block';
+                }
+            });
+        });
+        // Trigger on load if already selected
+        const selected = document.querySelector('input[name="kind"]:checked');
+        if (selected) selected.dispatchEvent(new Event('change'));
+
+        // Search functionality for checkbox lists
+        document.querySelectorAll('.search-input').forEach(searchInput => {
+            searchInput.addEventListener('input', function() {
+                const targetId = this.getAttribute('data-target');
+                const container = document.getElementById(targetId);
+                const filter = this.value.toLowerCase();
+                const items = container.querySelectorAll('li');
+                items.forEach(item => {
+                    const label = item.querySelector('label');
+                    const text = label ? label.textContent.toLowerCase() : '';
+                    item.style.display = text.includes(filter) ? '' : 'none';
+                });
+            });
+        });
+    </script>
 {% else %}
     <p class="text-sm text-gray-500">Unable to load study set form.</p>
 {% endif %}

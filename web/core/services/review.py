@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
@@ -38,9 +38,9 @@ class StudyScope:
     deck: Optional[Deck] = None
     tag: Optional[str] = None
     study_set: Optional[StudySet] = None
-    decks: list[Deck] = []
-    tags: list[str] = []
-    filenames: list[str] = []
+    decks: list[Deck] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    filenames: list[str] = field(default_factory=list)
 
     @classmethod
     def from_deck(cls, deck: Deck | None):

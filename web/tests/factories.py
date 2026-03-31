@@ -79,3 +79,13 @@ class ExternalIdFactory(factory.django.DjangoModelFactory):
 
     class Meta:
         model = ExternalId
+
+
+class StudySetFactory(factory.django.DjangoModelFactory):
+    user = factory.SubFactory(UserFactory)
+    name = factory.Sequence(lambda n: f'Study Set {n}')
+    kind = 'custom'
+    is_favorite = False
+
+    class Meta:
+        model = 'core.StudySet'

@@ -1,6 +1,9 @@
 import pytest
 from django.urls import reverse
 
+from core.models import StudySet
+from tests.factories import CardFactory, DeckFactory, StudySetFactory, UserFactory
+
 pytestmark = pytest.mark.django_db
 
 
@@ -29,3 +32,39 @@ def test_study_page_renders_with_scope(client, user_factory, deck_factory):
     body = response.content.decode('utf-8')
     assert 'Focused review' in body
     assert str(deck.full_path()) in body
+
+
+def test_custom_study_set_or_logic():
+    user = UserFactory()
+    deck1 = DeckFactory(user=user, name='Deck1')
+    deck2 = DeckFactory(user=user, name='Deck2')
+    card1 = CardFactory(user=user, deck=deck1, tags=['tag1'], source_path='file1.md')
+    card2 = CardFactory(user=user, deck=deck2, tags=['tag2'], source_path='file2.md')
+    card3 = CardFactory(user=user, deck=deck1, tags=['tag3'], source_path='file3.md')
+
+    study_set = StudySetFactory(user=user, kind=StudySet.KIND_CUSTOM)
+    study_set.decks.set([deck1])
+    study_set.tags = ['tag2']
+    study_set.filenames = ['file3.md']
+    study_set.save()
+
+    from core.services.review import StudyScope, _scoped_states
+    scope = StudyScope.from_study_set(study_set)
+    states = _scoped_states(user, scope=scope)
+    card_ids = set(states.values_list('card_id', flat=True))
+
+    # Should include card1 (deck1), card2 (tag2), card3 (file3.md)
+    assert card1.id in card_ids
+    assert card2.id in card_ids
+    assert card3.id in card_ids
+
+
+def test_custom_study_set_empty():
+    user = UserFactory()
+    study_set = StudySetFactory(user=user, kind=StudySet.KIND_CUSTOM)
+    # No decks, tags, or filenames
+
+    from core.services.review import StudyScope, _scoped_states
+    scope = StudyScope.from_study_set(study_set)
+    states = _scoped_states(user, scope=scope)
+    assert states.count() == 0

@@ -128,9 +128,11 @@ class Deck(models.Model):
 class StudySet(models.Model):
     KIND_DECK = 'deck'
     KIND_TAG = 'tag'
+    KIND_CUSTOM = 'custom'
     KIND_CHOICES = [
         (KIND_DECK, 'Deck'),
         (KIND_TAG, 'Tag'),
+        (KIND_CUSTOM, 'Custom'),
     ]
 
     id = models.BigAutoField(primary_key=True)
@@ -139,6 +141,9 @@ class StudySet(models.Model):
     kind = models.CharField(max_length=20, choices=KIND_CHOICES)
     deck = models.ForeignKey(Deck, null=True, blank=True, on_delete=models.CASCADE, related_name='study_sets')
     tag = models.CharField(max_length=255, blank=True)
+    decks = models.ManyToManyField(Deck, blank=True, related_name='custom_study_sets')
+    tags = ArrayField(models.TextField(), blank=True, default=list)
+    filenames = ArrayField(models.TextField(), blank=True, default=list)
     is_favorite = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -150,27 +155,11 @@ class StudySet(models.Model):
         constraints = [
             models.CheckConstraint(
                 check=(
-                    models.Q(kind='deck', deck__isnull=False)
-                    | models.Q(kind='tag', deck__isnull=True)
+                    models.Q(kind='deck', deck__isnull=False, decks__isnull=True, tags__len=0, filenames__len=0)
+                    | models.Q(kind='tag', deck__isnull=True, tag__gt='', decks__isnull=True, tags__len=0, filenames__len=0)
+                    | models.Q(kind='custom', deck__isnull=True, tag='', decks__isnull=False, tags__isnull=False, filenames__isnull=False)
                 ),
-                name='study_set_requires_matching_deck_state',
-            ),
-            models.CheckConstraint(
-                check=(
-                    models.Q(kind='tag', tag__gt='')
-                    | models.Q(kind='deck')
-                ),
-                name='study_set_requires_tag_for_tag_kind',
-            ),
-            models.UniqueConstraint(
-                fields=['user', 'deck'],
-                condition=models.Q(kind='deck'),
-                name='study_set_unique_deck',
-            ),
-            models.UniqueConstraint(
-                fields=['user', 'tag'],
-                condition=models.Q(kind='tag'),
-                name='study_set_unique_tag',
+                name='study_set_kind_constraints',
             ),
         ]
 
@@ -179,6 +168,16 @@ class StudySet(models.Model):
             return f"{self.name} (Tag: {self.tag})"
         if self.deck:
             return f"{self.name} (Deck: {self.deck.full_path()})"
+        if self.kind == self.KIND_CUSTOM:
+            parts = []
+            if self.decks.exists():
+                deck_names = [d.full_path() for d in self.decks.all()]
+                parts.append(f"Decks: {', '.join(deck_names)}")
+            if self.tags:
+                parts.append(f"Tags: {', '.join(self.tags)}")
+            if self.filenames:
+                parts.append(f"Files: {', '.join(self.filenames)}")
+            return f"{self.name} ({'; '.join(parts)})"
         return self.name
 
 

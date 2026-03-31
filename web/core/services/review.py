@@ -38,6 +38,9 @@ class StudyScope:
     deck: Optional[Deck] = None
     tag: Optional[str] = None
     study_set: Optional[StudySet] = None
+    decks: list[Deck] = []
+    tags: list[str] = []
+    filenames: list[str] = []
 
     @classmethod
     def from_deck(cls, deck: Deck | None):
@@ -53,6 +56,13 @@ class StudyScope:
             return cls(deck=study_set.deck, study_set=study_set)
         if study_set.kind == StudySet.KIND_TAG:
             return cls(tag=study_set.tag, study_set=study_set)
+        if study_set.kind == StudySet.KIND_CUSTOM:
+            return cls(
+                study_set=study_set,
+                decks=list(study_set.decks.all()),
+                tags=study_set.tags,
+                filenames=study_set.filenames,
+            )
         return cls(study_set=study_set)
 
     @property
@@ -93,12 +103,27 @@ def _resolve_scope(deck: Optional[Deck], scope: Optional[StudyScope]) -> Optiona
 def _scoped_states(user, deck: Optional[Deck] = None, scope: Optional[StudyScope] = None):
     resolved_scope = _resolve_scope(deck, scope)
     qs = SchedulingState.objects.select_related('card', 'card__deck').filter(card__user=user)
-    target_deck = resolved_scope.deck_target if resolved_scope else None
-    if target_deck is not None:
-        qs = qs.filter(card__deck_id__in=target_deck.descendant_ids())
-    tag_value = resolved_scope.tag_value if resolved_scope else None
-    if tag_value:
-        qs = qs.filter(card__tags__contains=[tag_value])
+    if resolved_scope:
+        target_deck = resolved_scope.deck_target
+        if target_deck is not None:
+            qs = qs.filter(card__deck_id__in=target_deck.descendant_ids())
+        tag_value = resolved_scope.tag_value
+        if tag_value:
+            qs = qs.filter(card__tags__contains=[tag_value])
+        # Handle custom scope
+        if resolved_scope.decks or resolved_scope.tags or resolved_scope.filenames:
+            q_objects = Q()
+            if resolved_scope.decks:
+                deck_ids = set()
+                for d in resolved_scope.decks:
+                    deck_ids.update(d.descendant_ids())
+                q_objects |= Q(card__deck_id__in=deck_ids)
+            if resolved_scope.tags:
+                for tag in resolved_scope.tags:
+                    q_objects |= Q(card__tags__contains=[tag])
+            if resolved_scope.filenames:
+                q_objects |= Q(card__source_path__in=resolved_scope.filenames)
+            qs = qs.filter(q_objects)
     return qs
 
 

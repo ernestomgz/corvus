@@ -42,26 +42,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
 document.addEventListener('keyup', function(e) {
     if (e.target.classList.contains('search-input')) {
-        console.log('search input event', e.target.value);
         const searchInput = e.target;
         const targetId = searchInput.getAttribute('data-target');
-        console.log('targetId', targetId);
         const container = document.getElementById(targetId);
-        console.log('container', container);
         if (container) {
             const listElement = container.querySelector('ul') || container.querySelector('div');
-            console.log('listElement', listElement);
             if (listElement) {
                 const itemSelector = listElement.tagName === 'UL' ? 'li' : 'div';
-                console.log('itemSelector', itemSelector);
                 const items = listElement.querySelectorAll(itemSelector);
-                console.log('items', items.length);
                 const filter = searchInput.value.toLowerCase().trim();
-                console.log('filter', filter);
                 items.forEach(item => {
                     const label = item.querySelector('label');
                     const text = label ? label.textContent.toLowerCase().trim() : '';
-                    console.log('text', text, 'includes', text.includes(filter));
                     item.style.display = text.includes(filter) ? '' : 'none';
                 });
             }

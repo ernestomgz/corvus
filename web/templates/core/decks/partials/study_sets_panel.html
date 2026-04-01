@@ -49,16 +49,22 @@ document.addEventListener('keyup', function(e) {
         const container = document.getElementById(targetId);
         console.log('container', container);
         if (container) {
-            const filter = searchInput.value.toLowerCase().trim();
-            console.log('filter', filter);
-            const items = container.querySelectorAll('li');
-            console.log('items', items.length);
-            items.forEach(item => {
-                const label = item.querySelector('label');
-                const text = label ? label.textContent.toLowerCase().trim() : '';
-                console.log('text', text, 'includes', text.includes(filter));
-                item.style.display = text.includes(filter) ? '' : 'none';
-            });
+            const listElement = container.querySelector('ul') || container.querySelector('div');
+            console.log('listElement', listElement);
+            if (listElement) {
+                const itemSelector = listElement.tagName === 'UL' ? 'li' : 'div';
+                console.log('itemSelector', itemSelector);
+                const items = listElement.querySelectorAll(itemSelector);
+                console.log('items', items.length);
+                const filter = searchInput.value.toLowerCase().trim();
+                console.log('filter', filter);
+                items.forEach(item => {
+                    const label = item.querySelector('label');
+                    const text = label ? label.textContent.toLowerCase().trim() : '';
+                    console.log('text', text, 'includes', text.includes(filter));
+                    item.style.display = text.includes(filter) ? '' : 'none';
+                });
+            }
         }
     }
 });

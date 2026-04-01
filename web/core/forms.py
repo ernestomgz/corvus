@@ -54,12 +54,15 @@ class DeckForm(forms.ModelForm):
 class StudySetForm(forms.ModelForm):
     class Meta:
         model = StudySet
-        fields = ['name', 'kind', 'deck', 'tag']
+        fields = ['name', 'kind', 'deck', 'tag', 'decks', 'tags', 'filenames']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'w-full border rounded p-2'}),
             'kind': forms.RadioSelect(attrs={'class': 'flex gap-4 text-sm'}),
             'deck': forms.Select(attrs={'class': 'w-full border rounded p-2'}),
             'tag': forms.TextInput(attrs={'class': 'w-full border rounded p-2', 'placeholder': 'e.g. physics'}),
+            'decks': forms.CheckboxSelectMultiple(attrs={'class': 'space-y-1'}),
+            'tags': forms.CheckboxSelectMultiple(attrs={'class': 'space-y-1'}),
+            'filenames': forms.CheckboxSelectMultiple(attrs={'class': 'space-y-1'}),
         }
 
     def __init__(self, *args, user=None, **kwargs):
@@ -67,16 +70,35 @@ class StudySetForm(forms.ModelForm):
         self.user = user
         if user is not None:
             self.fields['deck'].queryset = Deck.objects.for_user(user).order_by('name')
+            self.fields['decks'].queryset = Deck.objects.for_user(user).order_by('name')
+            # Populate tags from user's cards
+            user_tags = Card.objects.for_user(user).values_list('tags', flat=True)
+            all_tags = set()
+            for tag_list in user_tags:
+                all_tags.update(tag_list)
+            self.fields['tags'].choices = [(tag, tag) for tag in sorted(all_tags)]
+            # Populate filenames from user's cards
+            user_filenames = Card.objects.for_user(user).exclude(source_path__isnull=True).values_list('source_path', flat=True).distinct()
+            self.fields['filenames'].choices = [(fn, fn) for fn in sorted(user_filenames)]
         else:
             self.fields['deck'].queryset = Deck.objects.none()
+            self.fields['decks'].queryset = Deck.objects.none()
+            self.fields['tags'].choices = []
+            self.fields['filenames'].choices = []
         self.fields['deck'].required = False
         self.fields['tag'].required = False
+        self.fields['decks'].required = False
+        self.fields['tags'].required = False
+        self.fields['filenames'].required = False
 
     def clean(self):
         cleaned = super().clean()
         kind = cleaned.get('kind')
         deck = cleaned.get('deck')
         tag = (cleaned.get('tag') or '').strip()
+        decks = cleaned.get('decks') or []
+        tags = cleaned.get('tags') or []
+        filenames = cleaned.get('filenames') or []
         name = (cleaned.get('name') or '').strip()
         if kind == StudySet.KIND_DECK:
             if not deck:
@@ -90,6 +112,18 @@ class StudySetForm(forms.ModelForm):
                 cleaned['tag'] = tag
                 if not name:
                     cleaned['name'] = f"Tag: {tag}"
+        elif kind == StudySet.KIND_CUSTOM:
+            if not decks and not tags and not filenames:
+                self.add_error(None, 'Select at least one deck, tag, or filename.')
+            if not name:
+                parts = []
+                if decks:
+                    parts.append(f"{len(decks)} deck{'s' if len(decks) > 1 else ''}")
+                if tags:
+                    parts.append(f"{len(tags)} tag{'s' if len(tags) > 1 else ''}")
+                if filenames:
+                    parts.append(f"{len(filenames)} file{'s' if len(filenames) > 1 else ''}")
+                cleaned['name'] = f"Custom: {', '.join(parts)}"
         else:
             self.add_error('kind', 'Choose how you want to study.')
         return cleaned
@@ -100,6 +134,8 @@ class StudySetForm(forms.ModelForm):
             study_set.user = self.user
         if commit:
             study_set.save()
+            if study_set.kind == StudySet.KIND_CUSTOM:
+                study_set.decks.set(self.cleaned_data['decks'])
         return study_set
 
 

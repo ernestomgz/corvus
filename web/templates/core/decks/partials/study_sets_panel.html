@@ -9,3 +9,55 @@
         </div>
     </details>
 </div>
+<script>
+document.addEventListener('change', function(e) {
+    if (e.target.name === 'kind') {
+        const radio = e.target;
+        const deckField = document.getElementById('deck-field');
+        const tagField = document.getElementById('tag-field');
+        const customFields = document.getElementById('custom-fields');
+        if (deckField && tagField && customFields) {
+            if (radio.value === 'deck') {
+                deckField.style.display = 'block';
+                tagField.style.display = 'none';
+                customFields.style.display = 'none';
+            } else if (radio.value === 'tag') {
+                deckField.style.display = 'none';
+                tagField.style.display = 'block';
+                customFields.style.display = 'none';
+            } else if (radio.value === 'custom') {
+                deckField.style.display = 'none';
+                tagField.style.display = 'none';
+                customFields.style.display = 'block';
+            }
+        }
+    }
+});
+
+// Trigger on load if already selected
+document.addEventListener('DOMContentLoaded', function() {
+    const selected = document.querySelector('input[name="kind"]:checked');
+    if (selected) selected.dispatchEvent(new Event('change'));
+});
+
+document.addEventListener('keyup', function(e) {
+    if (e.target.classList.contains('search-input')) {
+        const searchInput = e.target;
+        const targetId = searchInput.getAttribute('data-target');
+        const container = document.getElementById(targetId);
+        if (container) {
+            const listElement = container.querySelector('ul') || container.querySelector('div');
+            if (listElement) {
+                const itemSelector = listElement.tagName === 'UL' ? 'li' : 'div';
+                const items = listElement.querySelectorAll(itemSelector);
+                const filter = searchInput.value.toLowerCase().trim();
+                items.forEach(item => {
+                    const label = item.querySelector('label');
+                    const text = label ? label.textContent.toLowerCase().trim() : '';
+                    item.style.display = text.includes(filter) ? '' : 'none';
+                });
+            }
+        }
+    }
+});
+</script>

@@ -11,9 +11,9 @@
 </div>
 <script>
 // Trigger show/hide for kind on load
-const selected = document.querySelector('input[name="kind"]:checked');
-if (selected) {
-    const radio = selected;
+const selectedKind = document.querySelector('input[name="kind"]:checked');
+if (selectedKind) {
+    const radio = selectedKind;
     const deckField = document.getElementById('deck-field');
     const tagField = document.getElementById('tag-field');
     const customFields = document.getElementById('custom-fields');

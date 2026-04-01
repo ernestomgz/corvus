@@ -33,7 +33,7 @@
                                         {% if study_set.is_favorite %}Unpin{% else %}Pin{% endif %}
                                     </button>
                                 </form>
-                                <form method="post" action="{% url 'study_sets:delete' study_set.id %}" hx-post="{% url 'study_sets:delete' study_set.id %}" hx-target="#study-sets-panel" hx-swap="outerHTML" onsubmit="return confirm('Remove study set {{ study_set.name }}?');">
+                                <form method="post" action="{% url 'study_sets:delete' study_set.id %}" hx-post="{% url 'study_sets:delete' study_set.id %}" hx-target="#study-sets-panel" hx-swap="outerHTML" hx-confirm="Remove study set {{ study_set.name }}?">
                                     {% csrf_token %}
                                     <button type="submit" class="rounded border border-transparent px-2 py-1 hover:bg-red-50 text-red-600">Remove</button>
                                 </form>

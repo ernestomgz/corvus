@@ -11,12 +11,12 @@
 </div>
 <script>
 // Trigger show/hide for kind on load
-const selectedKind = document.querySelector('input[name="kind"]:checked');
+var selectedKind = document.querySelector('input[name="kind"]:checked');
 if (selectedKind) {
-    const radio = selectedKind;
-    const deckField = document.getElementById('deck-field');
-    const tagField = document.getElementById('tag-field');
-    const customFields = document.getElementById('custom-fields');
+    var radio = selectedKind;
+    var deckField = document.getElementById('deck-field');
+    var tagField = document.getElementById('tag-field');
+    var customFields = document.getElementById('custom-fields');
     if (deckField && tagField && customFields) {
         if (radio.value === 'deck') {
             deckField.style.display = 'block';

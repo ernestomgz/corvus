@@ -12,7 +12,27 @@
 <script>
 // Trigger show/hide for kind on load
 const selected = document.querySelector('input[name="kind"]:checked');
-if (selected) selected.dispatchEvent(new Event('change'));
+if (selected) {
+    const radio = selected;
+    const deckField = document.getElementById('deck-field');
+    const tagField = document.getElementById('tag-field');
+    const customFields = document.getElementById('custom-fields');
+    if (deckField && tagField && customFields) {
+        if (radio.value === 'deck') {
+            deckField.style.display = 'block';
+            tagField.style.display = 'none';
+            customFields.style.display = 'none';
+        } else if (radio.value === 'tag') {
+            deckField.style.display = 'none';
+            tagField.style.display = 'block';
+            customFields.style.display = 'none';
+        } else if (radio.value === 'custom') {
+            deckField.style.display = 'none';
+            tagField.style.display = 'none';
+            customFields.style.display = 'block';
+        }
+    }
+}
 </script>
 <script>
 document.addEventListener('change', function(e) {

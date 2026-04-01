@@ -1,5 +1,5 @@
 {% if study_set_form %}
-    <form method="post" action="{% url 'study_sets:create' %}" hx-post="{% url 'study_sets:create' %}" hx-target="#study-sets-panel" hx-swap="outerHTML" class="space-y-3">
+    <form method="post" action="{% if editing_study_set %}{% url 'study_sets:edit' editing_study_set.pk %}{% else %}{% url 'study_sets:create' %}{% endif %}" hx-post="{% if editing_study_set %}{% url 'study_sets:edit' editing_study_set.pk %}{% else %}{% url 'study_sets:create' %}{% endif %}" hx-target="#study-sets-panel" hx-swap="outerHTML" class="space-y-3">
         {% csrf_token %}
         <div class="space-y-1">
             {{ study_set_form.name.label_tag }}
@@ -52,7 +52,7 @@
                 </div>
             </div>
         </div>
-        <button type="submit" class="w-full rounded bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800">Save preset</button>
+        <button type="submit" class="w-full rounded bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800">{% if editing_study_set %}Update preset{% else %}Save preset{% endif %}</button>
     </form>
 {% else %}
     <p class="text-sm text-gray-500">Unable to load study set form.</p>

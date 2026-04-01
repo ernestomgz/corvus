@@ -40,17 +40,23 @@ document.addEventListener('DOMContentLoaded', function() {
     if (selected) selected.dispatchEvent(new Event('change'));
 });
 
-document.addEventListener('input', function(e) {
+document.addEventListener('keyup', function(e) {
     if (e.target.classList.contains('search-input')) {
+        console.log('search input event', e.target.value);
         const searchInput = e.target;
         const targetId = searchInput.getAttribute('data-target');
+        console.log('targetId', targetId);
         const container = document.getElementById(targetId);
+        console.log('container', container);
         if (container) {
             const filter = searchInput.value.toLowerCase().trim();
+            console.log('filter', filter);
             const items = container.querySelectorAll('li');
+            console.log('items', items.length);
             items.forEach(item => {
                 const label = item.querySelector('label');
                 const text = label ? label.textContent.toLowerCase().trim() : '';
+                console.log('text', text, 'includes', text.includes(filter));
                 item.style.display = text.includes(filter) ? '' : 'none';
             });
         }

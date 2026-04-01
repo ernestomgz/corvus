@@ -54,46 +54,6 @@
         </div>
         <button type="submit" class="w-full rounded bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800">Save preset</button>
     </form>
-    <script>
-        document.querySelectorAll('input[name="kind"]').forEach(radio => {
-            radio.addEventListener('change', function() {
-                const deckField = document.getElementById('deck-field');
-                const tagField = document.getElementById('tag-field');
-                const customFields = document.getElementById('custom-fields');
-                if (this.value === 'deck') {
-                    deckField.style.display = 'block';
-                    tagField.style.display = 'none';
-                    customFields.style.display = 'none';
-                } else if (this.value === 'tag') {
-                    deckField.style.display = 'none';
-                    tagField.style.display = 'block';
-                    customFields.style.display = 'none';
-                } else if (this.value === 'custom') {
-                    deckField.style.display = 'none';
-                    tagField.style.display = 'none';
-                    customFields.style.display = 'block';
-                }
-            });
-        });
-        // Trigger on load if already selected
-        const selected = document.querySelector('input[name="kind"]:checked');
-        if (selected) selected.dispatchEvent(new Event('change'));
-
-        // Search functionality for checkbox lists
-        document.querySelectorAll('.search-input').forEach(searchInput => {
-            searchInput.addEventListener('input', function() {
-                const targetId = this.getAttribute('data-target');
-                const container = document.getElementById(targetId);
-                const filter = this.value.toLowerCase().trim();
-                const items = container.querySelectorAll('li');
-                items.forEach(item => {
-                    const label = item.querySelector('label');
-                    const text = label ? label.textContent.toLowerCase().trim() : '';
-                    item.style.display = text.includes(filter) ? '' : 'none';
-                });
-            });
-        });
-    </script>
 {% else %}
     <p class="text-sm text-gray-500">Unable to load study set form.</p>
 {% endif %}

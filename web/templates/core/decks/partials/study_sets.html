@@ -26,13 +26,14 @@
                         <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                             <a href="{% url 'review:study' %}?study_set_id={{ study_set.id }}" class="inline-flex items-center justify-center rounded bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800">Start</a>
                             <div class="flex items-center justify-end gap-2 text-xs text-gray-500">
+                                <button hx-get="{% url 'study_sets:edit' study_set.id %}" hx-target="#study-sets-panel" hx-swap="outerHTML" class="rounded border border-transparent px-2 py-1 hover:bg-gray-100">Edit</button>
                                 <form method="post" action="{% url 'study_sets:toggle_pin' study_set.id %}" hx-post="{% url 'study_sets:toggle_pin' study_set.id %}" hx-target="#study-sets-panel" hx-swap="outerHTML">
                                     {% csrf_token %}
                                     <button type="submit" class="rounded border border-transparent px-2 py-1 hover:bg-gray-100">
                                         {% if study_set.is_favorite %}Unpin{% else %}Pin{% endif %}
                                     </button>
                                 </form>
-                                <form method="post" action="{% url 'study_sets:delete' study_set.id %}" hx-post="{% url 'study_sets:delete' study_set.id %}" hx-target="#study-sets-panel" hx-swap="outerHTML" onsubmit="return confirm('Remove study set {{ study_set.name }}?');">
+                                <form method="post" action="{% url 'study_sets:delete' study_set.id %}" hx-post="{% url 'study_sets:delete' study_set.id %}" hx-target="#study-sets-panel" hx-swap="outerHTML" hx-confirm="Remove study set {{ study_set.name }}?">
                                     {% csrf_token %}
                                     <button type="submit" class="rounded border border-transparent px-2 py-1 hover:bg-red-50 text-red-600">Remove</button>
                                 </form>

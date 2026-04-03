@@ -48,6 +48,36 @@ def study_set_create(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+def study_set_edit(request: HttpRequest, pk: int) -> HttpResponse:
+    study_set = get_object_or_404(StudySet, pk=pk, user=request.user)
+    if request.method == 'POST':
+        form = StudySetForm(request.POST, instance=study_set, user=request.user)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Study set updated.')
+            context = _study_set_context(request)
+            if getattr(request, 'htmx', False):
+                return render(request, 'core/decks/partials/study_sets_panel.html', context)
+            return redirect('decks:list')
+        if getattr(request, 'htmx', False):
+            context = _study_set_context(request, study_set_form=form)
+            context['editing_study_set'] = study_set
+            return render(request, 'core/decks/partials/study_sets_panel.html', context)
+        deck_tree_context = _study_set_context(request, include_decks=True, study_set_form=form)
+        deck_tree_context['editing_study_set'] = study_set
+        return render(request, 'core/decks/list.html', deck_tree_context)
+    else:
+        form = StudySetForm(instance=study_set, user=request.user)
+        context = _study_set_context(request, study_set_form=form)
+        context['editing_study_set'] = study_set
+        if getattr(request, 'htmx', False):
+            return render(request, 'core/decks/partials/study_sets_panel.html', context)
+        deck_tree_context = _study_set_context(request, include_decks=True, study_set_form=form)
+        deck_tree_context['editing_study_set'] = study_set
+        return render(request, 'core/decks/list.html', deck_tree_context)
+
+
+@login_required
 def study_set_delete(request: HttpRequest, pk: int) -> HttpResponse:
     study_set = get_object_or_404(StudySet, pk=pk, user=request.user)
     if request.method == 'POST':

@@ -2,13 +2,38 @@
     <div id="study-set-list">
         {% include 'core/decks/partials/study_sets.html' %}
     </div>
-    <details class="rounded border border-dashed bg-white/70 px-4 py-3 text-sm text-gray-600">
-        <summary class="cursor-pointer text-sm font-semibold text-gray-700">Create new study preset</summary>
+    <details {% if editing_study_set %}open{% endif %} class="rounded border border-dashed bg-white/70 px-4 py-3 text-sm text-gray-600">
+        <summary class="cursor-pointer text-sm font-semibold text-gray-700">{% if editing_study_set %}Edit{% else %}Create new{% endif %} study preset</summary>
         <div class="mt-3">
             {% include 'core/decks/partials/study_set_form.html' %}
         </div>
     </details>
 </div>
+<script>
+// Trigger show/hide for kind on load
+var selectedKind = document.querySelector('input[name="kind"]:checked');
+if (selectedKind) {
+    var radio = selectedKind;
+    var deckField = document.getElementById('deck-field');
+    var tagField = document.getElementById('tag-field');
+    var customFields = document.getElementById('custom-fields');
+    if (deckField && tagField && customFields) {
+        if (radio.value === 'deck') {
+            deckField.style.display = 'block';
+            tagField.style.display = 'none';
+            customFields.style.display = 'none';
+        } else if (radio.value === 'tag') {
+            deckField.style.display = 'none';
+            tagField.style.display = 'block';
+            customFields.style.display = 'none';
+        } else if (radio.value === 'custom') {
+            deckField.style.display = 'none';
+            tagField.style.display = 'none';
+            customFields.style.display = 'block';
+        }
+    }
+}
+</script>
 <script>
 document.addEventListener('change', function(e) {
     if (e.target.name === 'kind') {

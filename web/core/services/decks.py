@@ -68,16 +68,28 @@ def get_deck_by_full_path(user, full_path: str) -> Deck | None:
 def plan_deck_path(user, root: Deck | None, path: list[str]) -> list[str]:
     current = root
     planned: list[str] = []
+    prefix = split_deck_path(root.full_path()) if root is not None else []
+    virtual_mode = False
+
     if current is None and not path:
         return planned
-    for name in path:
-        try:
-            current = Deck.objects.get(user=user, parent=current, name=name)
-        except Deck.DoesNotExist:
-            base_parts = current.full_path().split('/') if current is not None else []
-            planned_parts = [*base_parts, name]
-            planned.append('/'.join(part for part in planned_parts if part))
-            current = Deck(user=user, parent=current, name=name)
+
+    for raw_name in path:
+        name = raw_name.strip()
+        if not name:
+            continue
+
+        if not virtual_mode:
+            try:
+                current = Deck.objects.get(user=user, parent=current, name=name)
+                prefix.append(current.name)
+                continue
+            except Deck.DoesNotExist:
+                virtual_mode = True
+
+        prefix.append(name)
+        planned.append('/'.join(prefix))
+
     return planned
 
 

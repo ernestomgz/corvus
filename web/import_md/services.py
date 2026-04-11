@@ -29,7 +29,7 @@ MEDIA_WIKI_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ID_PATTERN = re.compile(r'^\s*id::\s*(?P<id>[\w:-]+)', re.IGNORECASE)
-IMPORT_ID_PATTERN = re.compile(r'(?<!\w)(?:#card|#long-card)\s+id:([^\s]+)', re.IGNORECASE)
+IMPORT_ID_PATTERN = re.compile(r'(?<!\w)(?:#card|#long-card)(?:[-/]reverse)?\s+id:([^\s]+)', re.IGNORECASE)
 TAGS_PATTERN = re.compile(r'^\s*tags::\s*(?P<tags>.+)$', re.IGNORECASE)
 MEDIA_PATTERN = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
 HEADING_PATTERN = re.compile(r'^\s*#+\s*')
@@ -414,6 +414,18 @@ def _build_field_values(parsed: ParsedCard) -> dict:
     return values
 
 
+def _split_import_id_value(raw_value: str, *, reverse_flag: bool) -> tuple[str | None, str | None]:
+    value = (raw_value or '').strip().lower()
+    if not value:
+        return None, None
+    if reverse_flag and '|' in value:
+        forward_raw, reverse_raw = value.split('|', 1)
+        forward_id = forward_raw.strip() or None
+        reverse_id = reverse_raw.strip() or None
+        return forward_id, reverse_id
+    return value, None
+
+
 def _update_heading_stack(line: str, stack: list[tuple[int, str]], clean_pattern: re.Pattern) -> int | None:
     match = HEADING_CAPTURE_PATTERN.match(line)
     if not match:
@@ -479,17 +491,24 @@ def _parse_markdown_cards(
 
         # Parse import ID from marker line
         import_id = None
+        reverse_import_id = None
         import_id_match = IMPORT_ID_PATTERN.search(line)
         if import_id_match:
-            import_id = import_id_match.group(1).lower()
+            import_id, reverse_import_id = _split_import_id_value(
+                import_id_match.group(1),
+                reverse_flag=reverse_flag,
+            )
             # If front_content is just the ID part, remove it
             if front_content and front_content.lower().startswith('id:'):
                 front_content = ''
         elif front_after and front_after.lower().startswith('id:'):
             # Handle inline id: syntax without full marker pattern
-            id_match = re.match(r'id:([a-f0-9]+)', front_after, re.IGNORECASE)
+            id_match = re.match(r'id:([^\s]+)', front_after, re.IGNORECASE)
             if id_match:
-                import_id = id_match.group(1).lower()
+                import_id, reverse_import_id = _split_import_id_value(
+                    id_match.group(1),
+                    reverse_flag=reverse_flag,
+                )
                 front_content = front_before  # Remove the id part from front_content
 
         if not front_content:
@@ -671,8 +690,8 @@ def _parse_markdown_cards(
                     errors=list(card_errors),
                     marker_line=line_no,
                     marker_kind='reverse',
-                    had_explicit_import_id=bool(import_id),
-                    import_id=import_id,
+                    had_explicit_import_id=bool(reverse_import_id),
+                    import_id=reverse_import_id,
                 )
             )
     return parsed_cards

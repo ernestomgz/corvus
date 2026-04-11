@@ -654,6 +654,7 @@ def _parse_markdown_cards(
             )
 
         external_key = anchor or _generate_external_key(source_path, line_no, front_md)
+        display_front_md = _compose_front_text(front_md, context_md)
         base_card = ParsedCard(
             front_md=front_md,
             back_md=back_md,
@@ -674,12 +675,12 @@ def _parse_markdown_cards(
         parsed_cards.append(base_card)
         if reverse_flag:
             reverse_key = f"{external_key}__reverse"
-            reverse_type = rule.card_type_slug if rule else infer_card_type(back_md, front_md)
+            reverse_type = rule.card_type_slug if rule else infer_card_type(back_md, display_front_md)
             parsed_cards.append(
                 ParsedCard(
                     front_md=back_md,
-                    back_md=front_md,
-                    context_md=context_md,
+                    back_md=display_front_md,
+                    context_md='',
                     source_path=source_path,
                     source_anchor=anchor,
                     external_key=reverse_key,

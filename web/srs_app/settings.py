@@ -115,8 +115,6 @@ LOGOUT_REDIRECT_URL = 'accounts:login'
 
 HTMX_USE_CDN = True
 
-IMPORTS_TMP_DIR = BASE_DIR / 'imports_tmp'
-
 SCHEDULER_DEFAULTS = {
     'learning_steps_minutes': [1, 10],
     'graduating_interval_days': 1,

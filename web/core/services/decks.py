@@ -48,6 +48,51 @@ def flatten_deck_ids(root: Deck, *, include_self: bool = True) -> list[int]:
     return ids
 
 
+def split_deck_path(value: str) -> list[str]:
+    return [segment.strip() for segment in value.split('/') if segment and segment.strip()]
+
+
+def get_deck_by_full_path(user, full_path: str) -> Deck | None:
+    parts = split_deck_path(full_path)
+    if not parts:
+        return None
+    current = None
+    for part in parts:
+        try:
+            current = Deck.objects.get(user=user, parent=current, name=part)
+        except Deck.DoesNotExist:
+            return None
+    return current
+
+
+def plan_deck_path(user, root: Deck | None, path: list[str]) -> list[str]:
+    current = root
+    planned: list[str] = []
+    prefix = split_deck_path(root.full_path()) if root is not None else []
+    virtual_mode = False
+
+    if current is None and not path:
+        return planned
+
+    for raw_name in path:
+        name = raw_name.strip()
+        if not name:
+            continue
+
+        if not virtual_mode:
+            try:
+                current = Deck.objects.get(user=user, parent=current, name=name)
+                prefix.append(current.name)
+                continue
+            except Deck.DoesNotExist:
+                virtual_mode = True
+
+        prefix.append(name)
+        planned.append('/'.join(prefix))
+
+    return planned
+
+
 def ensure_deck_path(user, root: Deck | None, path: list[str]) -> tuple[Deck, list[Deck]]:
     current = root
     created: list[Deck] = []

@@ -269,6 +269,29 @@ def test_md_card_reverse_marker_creates_reverse_copy(user_factory, deck_factory)
     assert cards[1].back_md == 'Capital of France'
 
 
+def test_md_reverse_card_moves_hierarchy_to_back(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        "# Title\n"
+        "## Subtitle\n"
+        "Description\n"
+        "#card-reverse\n"
+        "Answer"
+    )
+    archive = _build_zip({'note.md': markdown})
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+
+    assert record.summary['created'] == 2
+    cards = list(Card.objects.filter(user=user).order_by('created_at'))
+    assert cards[0].front_md.splitlines()[0] == 'Title > Subtitle'
+    assert cards[0].front_md.splitlines()[1] == 'Description'
+    assert cards[0].back_md == 'Answer'
+    assert cards[1].front_md == 'Answer'
+    assert cards[1].back_md.splitlines()[0] == 'Title > Subtitle'
+    assert cards[1].back_md.splitlines()[1] == 'Description'
+
+
 def test_prepare_session_requires_folders_without_root_deck(user_factory):
     user = user_factory()
     archive = _build_zip({'note.md': '#card Lonely\n\nBack'})

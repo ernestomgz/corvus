@@ -1,0 +1,97 @@
+.corvus-preview-modal {
+  width: min(960px, 92vw);
+}
+
+.corvus-preview-summary,
+.corvus-preview-card,
+.corvus-preview-decks,
+.corvus-preview-errors {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.corvus-preview-card.is-warning {
+  border-color: var(--text-warning);
+}
+
+.corvus-preview-card.is-error {
+  border-color: var(--text-error);
+}
+
+.corvus-preview-card-header {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.corvus-preview-card-title {
+  font-weight: 600;
+}
+
+.corvus-preview-card-meta {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin-bottom: 6px;
+}
+
+.corvus-preview-card-face {
+  margin-top: 12px;
+}
+
+.corvus-preview-card-face-label {
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.corvus-preview-card-front,
+.corvus-preview-card-back {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--background-secondary);
+  overflow-x: auto;
+}
+
+.corvus-preview-card-back {
+  background: var(--background-primary-alt);
+}
+
+.corvus-preview-card-front .markdown-rendered,
+.corvus-preview-card-back .markdown-rendered {
+  padding: 0;
+}
+
+.corvus-preview-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.corvus-preview-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: var(--font-ui-smaller);
+  background: var(--background-secondary);
+}
+
+.corvus-preview-errors ul,
+.corvus-preview-decks ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.corvus-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}

@@ -15,17 +15,15 @@ def test_new_card_learning_steps(card_factory):
     grade_card(card, 2, now=now)
     state.refresh_from_db()
     assert state.queue_status == 'learn'
-    assert abs((state.due_at - now).total_seconds() - 60) < 5
+    assert state.learning_step_index == 1
+    assert abs((state.due_at - now).total_seconds() - 600) < 5
 
-    grade_card(card, 2, now=now + timedelta(minutes=2))
-    state.refresh_from_db()
-    assert abs((state.due_at - (now + timedelta(minutes=2))).total_seconds() - 600) < 5
-
-    grade_card(card, 2, now=now + timedelta(hours=1))
+    grade_card(card, 2, now=now + timedelta(minutes=10))
     state.refresh_from_db()
     assert state.queue_status == 'review'
+    assert state.learning_step_index == 0
     assert state.interval_days == 1
-    assert abs((state.due_at - (now + timedelta(hours=1))).total_seconds() - 24 * 3600) < 60
+    assert abs((state.due_at - (now + timedelta(minutes=10))).total_seconds() - 24 * 3600) < 60
 
     other = card_factory()
     other_state = ensure_state(other)
@@ -33,6 +31,24 @@ def test_new_card_learning_steps(card_factory):
     other_state.refresh_from_db()
     assert other_state.queue_status == 'review'
     assert other_state.interval_days == 4
+
+
+def test_new_card_again_uses_first_learning_step(card_factory):
+    card = card_factory()
+    state = ensure_state(card)
+    now = timezone.now()
+
+    grade_card(card, 0, now=now)
+    state.refresh_from_db()
+    assert state.queue_status == 'learn'
+    assert state.learning_step_index == 0
+    assert abs((state.due_at - now).total_seconds() - 60) < 5
+
+    grade_card(card, 2, now=now + timedelta(minutes=1))
+    state.refresh_from_db()
+    assert state.queue_status == 'learn'
+    assert state.learning_step_index == 1
+    assert abs((state.due_at - (now + timedelta(minutes=1))).total_seconds() - 600) < 5
 
 
 def test_review_grade_transitions(card_factory):

@@ -1,0 +1,10 @@
+{
+  "id": "corvus-sync",
+  "name": "Corvus Sync",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Sync the current note to Corvus using server-side preview and apply sessions.",
+  "author": "OpenAI Codex",
+  "authorUrl": "https://openai.com",
+  "isDesktopOnly": true
+}

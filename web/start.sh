@@ -7,9 +7,10 @@ until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER"; do
   sleep 1
 done
 
+mkdir -p media static/css
+
 if [ -f package.json ]; then
   npm install --no-fund --no-audit >/dev/null 2>&1 || true
-  mkdir -p static/css
   npx tailwindcss -i ./static_src/input.css -o ./static/css/tailwind.css --minify || true
 fi
 

@@ -16,13 +16,20 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from accounts.models import User
-from core.models import Card, Deck, Import, KnowledgeMap, KnowledgeNode, Review, SchedulingState
+from core.models import Card, Deck, Import, ImportSession, KnowledgeMap, KnowledgeNode, Review, SchedulingState
 from core.scheduling import ensure_state
 from core.services.review import get_next_card, get_today_summary, grade_card_for_user
 from core.services.card_types import resolve_card_type
+from core.services.decks import get_deck_by_full_path
 from core.services.knowledge_maps import KnowledgeMapImportError, import_knowledge_map_from_payload
 from import_anki.services import AnkiImportError, process_apkg_archive
-from import_md.services import MarkdownImportError, process_markdown_archive
+from import_md.services import (
+    MarkdownImportError,
+    apply_markdown_session,
+    cancel_markdown_session,
+    prepare_markdown_note_session,
+    process_markdown_archive,
+)
 
 
 def _json_error(message: str, status: int = 400) -> JsonResponse:
@@ -100,6 +107,89 @@ def _card_to_dict(card: Card) -> dict:
             'lapses': state.lapses,
             'last_rating': state.last_rating,
         },
+    }
+
+
+def _parse_attachment_manifest(raw_manifest: str | None) -> list[dict[str, str]]:
+    if not raw_manifest:
+        return []
+    try:
+        payload = json.loads(raw_manifest)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f'Invalid attachment_manifest: {exc}') from exc
+    if not isinstance(payload, list):
+        raise ValueError('attachment_manifest must be a JSON list')
+    manifest: list[dict[str, str]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError('attachment_manifest items must be objects')
+        field = item.get('field')
+        path = item.get('path')
+        if not isinstance(field, str) or not field.strip():
+            raise ValueError('attachment_manifest items require a non-empty field')
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError('attachment_manifest items require a non-empty path')
+        manifest.append({'field': field.strip(), 'path': path.strip()})
+    return manifest
+
+
+def _extract_obsidian_attachments(request: HttpRequest) -> dict[str, bytes]:
+    manifest = _parse_attachment_manifest(request.POST.get('attachment_manifest'))
+    attachments: dict[str, bytes] = {}
+    for item in manifest:
+        upload = request.FILES.get(item['field'])
+        if upload is None:
+            raise ValueError(f"attachment file missing for field '{item['field']}'")
+        attachments[item['path']] = upload.read()
+    return attachments
+
+
+def _target_deck_path(root_deck_path: str, card_payload: dict[str, Any]) -> str:
+    deck_parts = [str(part).strip() for part in (card_payload.get('deck_path') or []) if str(part).strip()]
+    if not root_deck_path:
+        return '/'.join(deck_parts)
+    if not deck_parts:
+        return root_deck_path
+    return '/'.join([root_deck_path, *deck_parts])
+
+
+def _serialise_obsidian_session(session: ImportSession) -> dict[str, Any]:
+    payload = dict(session.payload or {})
+    obsidian = payload.get('obsidian') or {}
+    root_deck_path = str(obsidian.get('root_deck_path') or '')
+    cards_payload = []
+    for card in payload.get('cards', []):
+        existing = card.get('existing') or {}
+        cards_payload.append(
+            {
+                'index': card.get('index'),
+                'marker_line': card.get('marker_line'),
+                'marker_kind': card.get('marker_kind'),
+                'import_id': card.get('import_id'),
+                'front_md': card.get('front_md'),
+                'back_md': card.get('back_md'),
+                'existing': bool(existing),
+                'existing_card_id': existing.get('card_id') if isinstance(existing, dict) else None,
+                'has_changes': bool(card.get('has_changes')),
+                'unchanged': bool(card.get('unchanged')),
+                'warnings': list(card.get('warnings') or []),
+                'errors': list(card.get('errors') or []),
+                'target_deck_path': _target_deck_path(root_deck_path, card),
+                'deck_path': list(card.get('deck_path') or []),
+                'will_write_back_id': bool(card.get('import_id')) and not bool(card.get('had_explicit_import_id')),
+            }
+        )
+    return {
+        'session_id': str(session.id),
+        'status': session.status,
+        'source_name': session.source_name,
+        'source_hash': obsidian.get('source_hash', ''),
+        'source_path': obsidian.get('source_path', ''),
+        'root_deck_path': root_deck_path,
+        'summary': payload.get('summary', {}),
+        'planned_decks': list(obsidian.get('planned_decks') or []),
+        'has_errors': bool(payload.get('summary', {}).get('has_errors')),
+        'cards': cards_payload,
     }
 
 
@@ -673,6 +763,145 @@ def analytics_heatmap_day(request: HttpRequest, date_str: str) -> JsonResponse:
         'reviews': review_payload,
         'due': due_payload,
     })
+
+
+def _get_obsidian_session(user: User, session_id: str) -> ImportSession:
+    try:
+        session = ImportSession.objects.get(id=session_id, user=user, kind='markdown')
+    except ImportSession.DoesNotExist as exc:
+        raise LookupError('preview session not found') from exc
+    obsidian = (session.payload or {}).get('obsidian') or {}
+    if obsidian.get('source_system') != 'obsidian':
+        raise LookupError('preview session not found')
+    return session
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def obsidian_preview_create(request: HttpRequest) -> JsonResponse:
+    try:
+        user = _require_user(request)
+    except PermissionError as exc:
+        return _json_error(str(exc), status=401)
+
+    source_path = (request.POST.get('source_path') or '').strip()
+    content = request.POST.get('content')
+    root_deck_path = (request.POST.get('root_deck_path') or '').strip()
+    source_hash = (request.POST.get('source_hash') or '').strip()
+
+    if not source_path or content is None or not root_deck_path or not source_hash:
+        return _json_error('source_path, content, root_deck_path, and source_hash required')
+
+    root_deck = get_deck_by_full_path(user, root_deck_path)
+    if root_deck is None:
+        return _json_error('root deck not found', status=404)
+
+    try:
+        attachments = _extract_obsidian_attachments(request)
+        session = prepare_markdown_note_session(
+            user=user,
+            root_deck=root_deck,
+            source_path=source_path,
+            content=content,
+            attachments=attachments,
+            source_hash=source_hash,
+        )
+    except (ValueError, MarkdownImportError) as exc:
+        return _json_error(str(exc), status=400)
+
+    return JsonResponse(_serialise_obsidian_session(session), status=201)
+
+
+@require_http_methods(['GET'])
+def obsidian_preview_detail(request: HttpRequest, session_id: str) -> JsonResponse:
+    try:
+        user = _require_user(request)
+    except PermissionError as exc:
+        return _json_error(str(exc), status=401)
+    try:
+        session = _get_obsidian_session(user, session_id)
+    except LookupError as exc:
+        return _json_error(str(exc), status=404)
+    return JsonResponse(_serialise_obsidian_session(session))
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def obsidian_preview_apply(request: HttpRequest, session_id: str) -> JsonResponse:
+    try:
+        user = _require_user(request)
+    except PermissionError as exc:
+        return _json_error(str(exc), status=401)
+    try:
+        session = _get_obsidian_session(user, session_id)
+    except LookupError as exc:
+        return _json_error(str(exc), status=404)
+    if session.status != 'ready':
+        return _json_error('preview session is not ready to apply', status=409)
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc))
+
+    source_hash = str(payload.get('source_hash') or '').strip()
+    expected_hash = str(((session.payload or {}).get('obsidian') or {}).get('source_hash') or '').strip()
+    if not source_hash:
+        return _json_error('source_hash required')
+    if source_hash != expected_hash:
+        return _json_error('source_hash does not match preview session', status=409)
+
+    raw_decisions = payload.get('decisions', [])
+    if raw_decisions is None:
+        raw_decisions = []
+    if not isinstance(raw_decisions, list):
+        return _json_error('decisions must be a list')
+
+    decisions: dict[int, str] = {}
+    for item in raw_decisions:
+        if not isinstance(item, dict):
+            return _json_error('decisions items must be objects')
+        try:
+            index = int(item.get('index'))
+        except (TypeError, ValueError):
+            return _json_error('decision index must be an integer')
+        action = str(item.get('action') or '').strip().lower()
+        if action not in {'apply', 'skip'}:
+            return _json_error("decision action must be 'apply' or 'skip'")
+        decisions[index] = 'imported' if action == 'apply' else 'skip'
+
+    try:
+        import_record = apply_markdown_session(session, decisions=decisions)
+    except MarkdownImportError as exc:
+        return _json_error(str(exc), status=400)
+
+    session.refresh_from_db()
+    applied_cards = list((session.payload or {}).get('apply_results') or [])
+    return JsonResponse(
+        {
+            'session_id': str(session.id),
+            'status': session.status,
+            'summary': {
+                **import_record.summary,
+                'failed': 0,
+            },
+            'cards': applied_cards,
+        }
+    )
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def obsidian_preview_cancel(request: HttpRequest, session_id: str) -> JsonResponse:
+    try:
+        user = _require_user(request)
+    except PermissionError as exc:
+        return _json_error(str(exc), status=401)
+    try:
+        session = _get_obsidian_session(user, session_id)
+    except LookupError as exc:
+        return _json_error(str(exc), status=404)
+    cancel_markdown_session(session)
+    return JsonResponse({'session_id': str(session.id), 'status': session.status})
 
 
 @csrf_exempt

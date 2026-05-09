@@ -6,7 +6,7 @@ from core.services.markdown_renderer import render_to_html
 @pytest.mark.parametrize(
     ('source', 'expected_class', 'expected_tokens'),
     [
-        ('x = \\frac{1}{2}', 'math-inline', ('\\(', '\\)')),
+        ('\\(x = \\frac{1}{2}\\)', 'math-inline', ('\\(', '\\)')),
         ('[]y = x^2[/]', 'math-block', ('\\[', '\\]')),
         ('$value$', 'math-inline', ('\\(', '\\)')),
         ('$$E = mc^2$$', 'math-block', ('\\[', '\\]')),

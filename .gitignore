@@ -10,7 +10,6 @@ __pycache__/
 db.sqlite3
 web/staticfiles/
 web/media/
-web/imports_tmp/
 
 # Environment variables
 .env
@@ -70,4 +69,3 @@ coverage.xml
 # ----------------------------
 *.swp
 *.swo
-

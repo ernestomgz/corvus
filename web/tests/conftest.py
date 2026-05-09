@@ -15,9 +15,6 @@ def _media_root(tmp_path, settings):
     media_root = tmp_path / 'media'
     media_root.mkdir(parents=True, exist_ok=True)
     settings.MEDIA_ROOT = media_root
-    imports_tmp = tmp_path / 'imports_tmp'
-    imports_tmp.mkdir(parents=True, exist_ok=True)
-    settings.IMPORTS_TMP_DIR = imports_tmp
     yield
 
 

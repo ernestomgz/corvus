@@ -188,14 +188,11 @@ def _handle_learning(card: Card, state: SchedulingState, rating: int, now: datet
             state.due_at = now + _minutes_delta(steps[index + 1])
             return
 
-        # index == max_index: one more pass on last step before graduating next time
-        state.learning_step_index = max_index + 1
-        state.due_at = now + _minutes_delta(steps[max_index])
+        _graduate_to_review(state, now, config, config.graduating_interval_days)
         return
 
     if rating == 3:  # Easy
-        easy_days = 1
-        _graduate_to_review(state, now, config, easy_days)
+        _graduate_to_review(state, now, config, config.easy_bonus_days)
 
 
 def _graduate_to_review(state: SchedulingState, now: datetime, config: SchedulerConfig, interval_days: int) -> None:

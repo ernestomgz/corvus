@@ -38,9 +38,35 @@
   margin-bottom: 6px;
 }
 
-.corvus-preview-card-front {
-  white-space: pre-wrap;
-  font-family: var(--font-text);
+.corvus-preview-card-face {
+  margin-top: 12px;
+}
+
+.corvus-preview-card-face-label {
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.corvus-preview-card-front,
+.corvus-preview-card-back {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--background-secondary);
+  overflow-x: auto;
+}
+
+.corvus-preview-card-back {
+  background: var(--background-primary-alt);
+}
+
+.corvus-preview-card-front .markdown-rendered,
+.corvus-preview-card-back .markdown-rendered {
+  padding: 0;
 }
 
 .corvus-preview-badges {

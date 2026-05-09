@@ -1,4 +1,4 @@
-import { ButtonComponent, Modal } from "obsidian";
+import { ButtonComponent, MarkdownRenderChild, MarkdownRenderer, Modal } from "obsidian";
 
 import type { ApplyDecision, PreviewCard, PreviewSession } from "./types";
 
@@ -8,6 +8,8 @@ export class SyncPreviewModal extends Modal {
   private resolved = false;
 
   private resolver: ((value: ApplyDecision[] | null) => void) | null = null;
+
+  private readonly markdownChildren: MarkdownRenderChild[] = [];
 
   constructor(app: Modal["app"], private readonly preview: PreviewSession) {
     super(app);
@@ -74,6 +76,10 @@ export class SyncPreviewModal extends Modal {
   }
 
   onClose(): void {
+    for (const child of this.markdownChildren) {
+      child.unload();
+    }
+    this.markdownChildren.length = 0;
     this.contentEl.empty();
     if (!this.resolved && this.resolver) {
       this.resolved = true;
@@ -108,7 +114,7 @@ export class SyncPreviewModal extends Modal {
     });
     leftEl.createEl("div", {
       cls: "corvus-preview-card-meta",
-      text: `Line ${card.marker_line} · ${card.target_deck_path}`,
+      text: `Line ${card.marker_line} | ${card.target_deck_path}`,
     });
 
     const rightEl = headerEl.createDiv({ cls: "corvus-preview-badges" });
@@ -132,10 +138,8 @@ export class SyncPreviewModal extends Modal {
     });
     headerEl.prepend(checkbox);
 
-    cardEl.createDiv({
-      cls: "corvus-preview-card-front",
-      text: card.front_md || "(empty front)",
-    });
+    this.renderCardFace(cardEl, "Front", card.front_md || "(empty front)", "corvus-preview-card-front");
+    this.renderCardFace(cardEl, "Back", card.back_md || "(empty back)", "corvus-preview-card-back");
 
     if (card.warnings.length > 0) {
       const warningsEl = cardEl.createDiv({ cls: "corvus-preview-errors" });
@@ -156,6 +160,23 @@ export class SyncPreviewModal extends Modal {
     }
 
     return cardEl;
+  }
+
+  private renderCardFace(
+    parent: HTMLElement,
+    label: string,
+    markdown: string,
+    cls: string,
+  ): void {
+    const sectionEl = parent.createDiv({ cls: "corvus-preview-card-face" });
+    sectionEl.createEl("div", {
+      cls: "corvus-preview-card-face-label",
+      text: label,
+    });
+    const bodyEl = sectionEl.createDiv({ cls });
+    const renderChild = new MarkdownRenderChild(bodyEl);
+    this.markdownChildren.push(renderChild);
+    void MarkdownRenderer.render(this.app, markdown, bodyEl, "", renderChild);
   }
 
   private actionLabel(card: PreviewCard): string {

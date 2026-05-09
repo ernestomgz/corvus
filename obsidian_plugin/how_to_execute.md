@@ -83,7 +83,7 @@ Use `Test` to verify login works.
 
 ## Use The Plugin
 
-1. Open a markdown note with `#card` or `#card-reverse` markers.
+1. Open a markdown note with `#card`, `#card-reverse`, `#long-card`, or `#long-card-reverse` markers.
 2. Run the command:
 
 ```text

@@ -17,8 +17,6 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.models import Card, Deck, ExternalId, Import
-from core.services.cards import infer_card_type, determine_card_type
-from core.services.card_types import resolve_card_type
 from core.services.decks import ensure_deck_path
 from core.scheduling import ensure_state, get_scheduler_config
 
@@ -267,11 +265,9 @@ def process_apkg_archive(*, user, deck: Deck, uploaded_file) -> Import:
                     try:
                         external = ExternalId.objects.select_related('card').get(system='anki', external_key=external_key)
                     except ExternalId.DoesNotExist:
-                        card_type_obj = determine_card_type(user, front_md, back_md)
                         card = Card.objects.create(
                             user=user,
                             deck=target_deck,
-                            card_type=card_type_obj,
                             front_md=front_md,
                             back_md=back_md,
                             tags=[],
@@ -303,12 +299,7 @@ def process_apkg_archive(*, user, deck: Deck, uploaded_file) -> Import:
                     card.back_md = back_md
                     card.media = media
                     card.deck = target_deck
-                    basic_types = {'basic', 'basic_image_front', 'basic_image_back'}
-                    current_slug = card.card_type.slug if card.card_type else 'basic'
-                    if current_slug in basic_types:
-                        inferred = infer_card_type(front_md, back_md, default=current_slug)
-                        card.card_type = resolve_card_type(user, inferred)
-                    card.save(update_fields=['front_md', 'back_md', 'media', 'deck', 'card_type', 'updated_at'])
+                    card.save(update_fields=['front_md', 'back_md', 'media', 'deck', 'updated_at'])
                     summary['updated'] += 1
             finally:
                 connection.close()

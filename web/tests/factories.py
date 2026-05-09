@@ -1,26 +1,8 @@
 import factory
-from django.utils import timezone
 
 from accounts.models import User
-from core.models import Card, Deck, ExternalId, SchedulingState, CardType
+from core.models import Card, Deck, ExternalId, SchedulingState
 from core.scheduling import ensure_state
-from core.services.card_types import ensure_builtin_card_types
-
-
-def _basic_card_type():
-    ensure_builtin_card_types()
-    card_type = CardType.objects.filter(slug='basic', user=None).first()
-    if card_type:
-        return card_type
-    return CardType.objects.create(
-        user=None,
-        slug='basic',
-        name='Basic',
-        description='Default front/back card',
-        field_schema=[{'key': 'front', 'label': 'Front'}, {'key': 'back', 'label': 'Back'}],
-        front_template='{{front}}',
-        back_template='{{back}}',
-    )
 
 
 class UserFactory(factory.django.DjangoModelFactory):
@@ -43,7 +25,6 @@ class DeckFactory(factory.django.DjangoModelFactory):
 class CardFactory(factory.django.DjangoModelFactory):
     user = factory.SubFactory(UserFactory)
     deck = factory.SubFactory(DeckFactory, user=factory.SelfAttribute('..user'))
-    card_type = factory.LazyFunction(_basic_card_type)
     front_md = factory.Sequence(lambda n: f'Front {n}')
     back_md = factory.Sequence(lambda n: f'Back {n}')
     tags = factory.LazyFunction(list)

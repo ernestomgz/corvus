@@ -73,14 +73,14 @@ export async function writeBackImportIds(
 }
 
 function replaceMarkerLine(line: string, group: WritebackGroup): string {
-  const markerPattern = /(#card(?:[-/]reverse)?)(?:\s+id:[^\s]+)?/i;
+  const markerPattern = /(#(?:long-)?card(?:-reverse)?)(?=$|\s)(?:\s+id:[^\s]+)?/i;
   const match = line.match(markerPattern);
   if (!match) {
     throw new Error(`Marker line ${group.line} no longer contains a supported card marker.`);
   }
 
   const marker = match[1];
-  const isReverseMarker = /#card(?:[-/]reverse)/i.test(marker);
+  const isReverseMarker = /#(?:long-)?card-reverse/i.test(marker);
 
   if (isReverseMarker) {
     if (group.cardId && group.reverseId) {

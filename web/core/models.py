@@ -7,7 +7,6 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Q
 from django.utils import timezone
 
 from .knowledge_tags import build_knowledge_tag
@@ -16,63 +15,6 @@ from .knowledge_tags import build_knowledge_tag
 class UserScopedQuerySet(models.QuerySet):
     def for_user(self, user: settings.AUTH_USER_MODEL) -> "UserScopedQuerySet":
         return self.filter(user=user)
-
-
-class CardType(models.Model):
-    id = models.BigAutoField(primary_key=True)
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='card_types',
-        null=True,
-        blank=True,
-    )
-    name = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=64)
-    description = models.TextField(blank=True)
-    field_schema = models.JSONField(default=list, blank=True)
-    front_template = models.TextField()
-    back_template = models.TextField()
-    created_at = models.DateTimeField(default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    objects = UserScopedQuerySet.as_manager()
-
-    class Meta:
-        ordering = ['name']
-        constraints = [
-            models.UniqueConstraint(fields=['user', 'slug'], name='unique_card_type_per_user'),
-            models.UniqueConstraint(
-                fields=['slug'],
-                condition=models.Q(user__isnull=True),
-                name='unique_global_card_type_slug',
-            ),
-        ]
-
-    def __str__(self) -> str:
-        owner = getattr(self.user, 'email', None) or 'global'
-        return f"{self.name} ({owner})"
-
-
-class CardImportFormat(models.Model):
-    FORMAT_CHOICES = [
-        ('markdown', 'Markdown'),
-    ]
-
-    id = models.BigAutoField(primary_key=True)
-    card_type = models.ForeignKey(CardType, on_delete=models.CASCADE, related_name='import_formats')
-    name = models.CharField(max_length=255)
-    format_kind = models.CharField(max_length=32, choices=FORMAT_CHOICES)
-    template = models.TextField()
-    options = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ['name']
-
-    def __str__(self) -> str:
-        return f"{self.card_type.name}: {self.name}"
 
 
 class Deck(models.Model):
@@ -354,11 +296,9 @@ class Card(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='cards')
     deck = models.ForeignKey(Deck, on_delete=models.CASCADE, related_name='cards')
-    card_type = models.ForeignKey(CardType, on_delete=models.PROTECT, related_name='cards')
     front_md = models.TextField()
     back_md = models.TextField()
     tags = ArrayField(models.TextField(), blank=True, default=list)
-    field_values = models.JSONField(default=dict, blank=True)
     source_path = models.TextField(null=True, blank=True)
     source_anchor = models.TextField(null=True, blank=True)
     media = models.JSONField(default=list)
@@ -376,8 +316,7 @@ class Card(models.Model):
         ordering = ['-updated_at']
 
     def __str__(self) -> str:
-        type_name = getattr(self.card_type, 'name', '')
-        return f"{type_name}: {self.front_md[:40]}"
+        return self.front_md[:40]
 
     def add_tag(self, tag: str) -> None:
         normalised = tag.strip()

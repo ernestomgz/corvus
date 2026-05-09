@@ -11,7 +11,6 @@ urlpatterns = [
     path('accounts/', include(('accounts.urls', 'accounts'), namespace='accounts')),
     path('decks/', include(('core.urls.decks', 'decks'), namespace='decks')),
     path('cards/', include(('core.urls.cards', 'cards'), namespace='cards')),
-    path('card-types/', include(('core.urls.card_types', 'card_types'), namespace='card_types')),
     path('study-sets/', include(('core.urls.study_sets', 'study_sets'), namespace='study_sets')),
     path('knowledge-maps/', include(('core.urls.knowledge_maps', 'knowledge_maps'), namespace='knowledge_maps')),
     path('review/', include(('core.urls.review', 'review'), namespace='review')),

@@ -26,7 +26,6 @@ def test_end_to_end_user_flow(client):
 
     card_payload = {
         'deck': str(deck.id),
-        'card_type': 'basic',
         'front_md': 'Front content',
         'back_md': 'Back content',
         'tags': 'flow,test',

@@ -4,10 +4,8 @@ import json
 from typing import Iterable
 
 from django import forms
-from django.db.models import Q
-from django.forms import inlineformset_factory
 
-from .models import Card, Deck, CardType, CardImportFormat, StudySet, UserSettings
+from .models import Card, Deck, StudySet, UserSettings
 
 
 def _normalise_tags(raw: Iterable[str]) -> list[str]:
@@ -145,16 +143,9 @@ class CardForm(forms.ModelForm):
         help_text='Comma-separated tags',
         widget=forms.TextInput(attrs={'class': 'w-full border rounded p-2'}),
     )
-    card_type = forms.ModelChoiceField(
-        queryset=CardType.objects.none(),
-        to_field_name='slug',
-        widget=forms.Select(attrs={'class': 'w-full border rounded p-2'}),
-        empty_label=None,
-    )
-
     class Meta:
         model = Card
-        fields = ['deck', 'card_type', 'front_md', 'back_md', 'tags']
+        fields = ['deck', 'front_md', 'back_md', 'tags']
         widgets = {
             'deck': forms.Select(attrs={'class': 'w-full border rounded p-2'}),
             'front_md': forms.Textarea(attrs={'class': 'w-full border rounded p-2 font-mono', 'rows': 5}),
@@ -166,14 +157,8 @@ class CardForm(forms.ModelForm):
         self.user = user
         if user is not None:
             self.fields['deck'].queryset = Deck.objects.for_user(user).order_by('name')
-            type_queryset = CardType.objects.filter(Q(user=user) | Q(user__isnull=True)).order_by('name')
-            self.fields['card_type'].queryset = type_queryset
-            default_type = type_queryset.filter(slug='basic').first()
-            if default_type and 'card_type' not in self.initial:
-                self.initial['card_type'] = default_type.slug
         else:
             self.fields['deck'].queryset = Deck.objects.none()
-            self.fields['card_type'].queryset = CardType.objects.none()
         if self.instance.pk:
             self.initial['tags'] = ', '.join(self.instance.tags)
 
@@ -206,86 +191,6 @@ class CardFilterForm(forms.Form):
         self.fields['deck'].widget.attrs.update({'class': 'border rounded p-2'})
         self.fields['tag'].widget.attrs.update({'class': 'border rounded p-2', 'placeholder': 'Tag'})
         self.fields['q'].widget.attrs.update({'class': 'border rounded p-2', 'placeholder': 'Search text'})
-
-
-class CardTypeForm(forms.ModelForm):
-    field_schema = forms.CharField(
-        required=False,
-        widget=forms.Textarea(attrs={'class': 'w-full border rounded p-2 font-mono', 'rows': 4}),
-        help_text='JSON list describing the fields for this card type.',
-    )
-
-    class Meta:
-        model = CardType
-        fields = ['name', 'slug', 'description', 'front_template', 'back_template', 'field_schema']
-        widgets = {
-            'name': forms.TextInput(attrs={'class': 'w-full border rounded p-2'}),
-            'slug': forms.TextInput(attrs={'class': 'w-full border rounded p-2'}),
-            'description': forms.Textarea(attrs={'class': 'w-full border rounded p-2', 'rows': 3}),
-            'front_template': forms.Textarea(attrs={'class': 'w-full border rounded p-2 font-mono', 'rows': 4}),
-            'back_template': forms.Textarea(attrs={'class': 'w-full border rounded p-2 font-mono', 'rows': 4}),
-        }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.instance.pk and 'field_schema' not in self.initial:
-            schema = self.instance.field_schema or []
-            self.initial['field_schema'] = json.dumps(schema, indent=2)
-
-    def clean_field_schema(self):
-        raw = self.cleaned_data.get('field_schema')
-        if not raw:
-            return []
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise forms.ValidationError(f'Field schema must be valid JSON: {exc}') from exc
-        if not isinstance(parsed, list):
-            raise forms.ValidationError('Field schema must be a JSON array.')
-        return parsed
-
-
-class CardImportFormatForm(forms.ModelForm):
-    options = forms.CharField(
-        required=False,
-        widget=forms.Textarea(attrs={'class': 'w-full border rounded p-2 font-mono', 'rows': 3}),
-        help_text='Optional JSON metadata for this import format.',
-    )
-
-    class Meta:
-        model = CardImportFormat
-        fields = ['name', 'format_kind', 'template', 'options']
-        widgets = {
-            'name': forms.TextInput(attrs={'class': 'w-full border rounded p-2'}),
-            'format_kind': forms.Select(attrs={'class': 'w-full border rounded p-2'}),
-            'template': forms.Textarea(attrs={'class': 'w-full border rounded p-2 font-mono', 'rows': 4}),
-        }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.instance.pk and 'options' not in self.initial:
-            self.initial['options'] = json.dumps(self.instance.options or {}, indent=2)
-
-    def clean_options(self):
-        raw = self.cleaned_data.get('options')
-        if not raw:
-            return {}
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise forms.ValidationError(f'Options must be valid JSON: {exc}') from exc
-        if not isinstance(parsed, dict):
-            raise forms.ValidationError('Options must be a JSON object.')
-        return parsed
-
-
-CardImportFormatFormSet = inlineformset_factory(
-    CardType,
-    CardImportFormat,
-    form=CardImportFormatForm,
-    extra=1,
-    can_delete=True,
-)
 
 
 class KnowledgeMapImportForm(forms.Form):

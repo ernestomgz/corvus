@@ -26,6 +26,8 @@ MEDIA_WIKI_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ID_PATTERN = re.compile(r'^\s*id::\s*(?P<id>[\w:-]+)', re.IGNORECASE)
+# Marker ids are the stable card identity used by current imports. Reverse markers may carry
+# a pair like id:front_id|reverse_id so each generated card can be updated independently.
 IMPORT_ID_PATTERN = re.compile(
     r'(?<!\w)(?:#card(?:-reverse)?|#long-card(?:-reverse)?)\s+id:([^\s]+)',
     re.IGNORECASE,
@@ -69,6 +71,7 @@ class MarkerResolver:
 
 
 FIXED_MARKER_RULES: tuple[MarkerRule, ...] = (
+    # Keep the accepted marker contract centralized; these are not user-configurable.
     MarkerRule('#long-card-reverse', long_card=True, reverse=True),
     MarkerRule('#card-reverse', long_card=False, reverse=True),
     MarkerRule('#long-card', long_card=True, reverse=False),
@@ -214,6 +217,8 @@ def _build_marker_resolver(user) -> MarkerResolver:
     lookup = {rule.token: rule for rule in FIXED_MARKER_RULES}
     unique_tokens = [rule.token for rule in FIXED_MARKER_RULES]
     joined = '|'.join(re.escape(token) for token in unique_tokens)
+    # Markers must end at whitespace or end-of-line; this intentionally rejects
+    # unsupported forms such as #card/reverse and ordinary words like #cardinal.
     marker_regex = re.compile(rf'(?<!\w)(?P<marker>{joined})(?=$|\s)', re.IGNORECASE)
     clean_pattern = re.compile(rf'(?<!\w)(?:{joined})(?=$|\s)', re.IGNORECASE)
     return MarkerResolver(pattern=marker_regex, clean_pattern=clean_pattern, lookup=lookup)
@@ -349,10 +354,10 @@ def _compose_front_text(body: str, context: str) -> str:
 
 
 def _generate_external_key(source_path: str, line_no: int, front_md: str) -> str:
-    """Generate a unique external key for a card based on its location and content."""
-    # Create a deterministic key based on file path and line number
+    """Generate a deterministic external key for cards without an id:: anchor."""
+    # The generated key is only for ExternalId uniqueness/writeback bookkeeping.
+    # It is not an update identity; no-id pushes should create new cards.
     key_base = f"{source_path}:{line_no}"
-    # Use first 8 chars of hash to keep it reasonably short
     key_hash = hashlib.md5(key_base.encode('utf-8')).hexdigest()[:8]
     return f"md_{key_hash}"
 
@@ -361,6 +366,8 @@ def _split_import_id_value(raw_value: str, *, reverse_flag: bool) -> tuple[str |
     value = (raw_value or '').strip().lower()
     if not value:
         return None, None
+    # Reverse markers can carry two ids: the normal card first, then the reverse card.
+    # Without the second id, the reverse card receives a new generated import_id.
     if reverse_flag and '|' in value:
         forward_raw, reverse_raw = value.split('|', 1)
         forward_id = forward_raw.strip() or None
@@ -430,7 +437,8 @@ def _parse_markdown_cards(
         if front_content:
             front_content = _clean_front_text(front_content)
 
-        # Parse import ID from marker line
+        # id: belongs to the marker line and drives updates for the current import format.
+        # id:: on the following line is handled below as a legacy external anchor.
         import_id = None
         reverse_import_id = None
         import_id_match = IMPORT_ID_PATTERN.search(line)
@@ -439,11 +447,9 @@ def _parse_markdown_cards(
                 import_id_match.group(1),
                 reverse_flag=reverse_flag,
             )
-            # If front_content is just the ID part, remove it
             if front_content and front_content.lower().startswith('id:'):
                 front_content = ''
         elif front_after and front_after.lower().startswith('id:'):
-            # Handle inline id: syntax without full marker pattern
             id_match = re.match(r'id:([^\s]+)', front_after, re.IGNORECASE)
             if id_match:
                 import_id, reverse_import_id = _split_import_id_value(
@@ -460,25 +466,21 @@ def _parse_markdown_cards(
                 stripped_line = lines[j].strip()
                 heading_match = HEADING_CAPTURE_PATTERN.match(stripped_line)
                 if heading_match:
-                    # Found a heading - skip it and continue looking back for actual content
-                    # (headings are context, not used as front content in lookback)
+                    # Headings become context; the front text comes from non-heading content nearby.
                     j -= 1
                     continue
-                # Skip lines that are pure marker lines (contain a marker at any position)
-                # These are previous cards' markers like "#card id:1234" or "Question #card id:1234"
                 marker_test = resolver.pattern.search(stripped_line)
                 if marker_test:
-                    # Any line with a marker is likely a previous card - stop looking back
+                    # Stop at a previous card boundary instead of borrowing its front text.
                     break
                 collected.insert(0, stripped_line)
                 j -= 1
-            
-            # Use collected lines if available, otherwise use empty
+
             if collected:
                 front_content = '\n'.join(collected).strip()
             else:
                 front_content = ''
-            
+
             front_content = _clean_front_text(front_content)
             if not front_content and heading_stack:
                 front_content = heading_stack[-1][1]
@@ -511,11 +513,12 @@ def _parse_markdown_cards(
         fence_delim = ''
         consecutive_blank = 0
 
+        # Short cards stop at the first blank line. Long cards preserve single blank
+        # lines and stop only after two consecutive blanks outside fenced code blocks.
         while i < len(lines):
             candidate = lines[i]
             stripped_line = candidate.strip()
 
-            # Detect fenced code block markers to ignore blank-line termination inside code blocks
             if stripped_line.startswith('```') or stripped_line.startswith('~~~'):
                 current_delim = stripped_line[:3]
                 if not in_fenced_block:
@@ -525,7 +528,6 @@ def _parse_markdown_cards(
                     in_fenced_block = False
                     fence_delim = ''
 
-            # New marker starts next card (unless inside fenced block)
             if not in_fenced_block and resolver.pattern.search(candidate):
                 break
 
@@ -536,7 +538,6 @@ def _parse_markdown_cards(
                 i += 1
                 continue
 
-            # Long-card mode: allow single blank lines inside back content
             if not stripped_line and not in_fenced_block:
                 consecutive_blank += 1
                 if consecutive_blank >= 2:
@@ -587,6 +588,8 @@ def _parse_markdown_cards(
                 f"Missing attachment(s): {', '.join(missing_all)}. Expected inside an 'attachments' folder next to {source_path}."
             )
 
+        # id:: anchors are preserved as external IDs for old imports. Without id:: we
+        # generate an external key, but updates still require explicit marker id:.
         external_key = anchor or _generate_external_key(source_path, line_no, front_md)
         display_front_md = _compose_front_text(front_md, context_md)
         base_card = ParsedCard(
@@ -607,6 +610,8 @@ def _parse_markdown_cards(
         )
         parsed_cards.append(base_card)
         if reverse_flag:
+            # The reverse copy is a separate card with its own identity. Its back uses
+            # the composed front so heading context is retained when front/back swap.
             reverse_key = f"{external_key}__reverse"
             parsed_cards.append(
                 ParsedCard(
@@ -710,33 +715,32 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
     parsed_cards, parse_summary = _collect_markdown_cards(
         user_id=user.id, uploaded_file=uploaded_file, resolver=resolver
     )
-    
-    # Handle import IDs
+
+    # Only explicit marker ids participate in existing-card lookup. Auto-generated ids
+    # are assigned after this so writeback has an id, but they must not trigger updates.
     import_ids = [card.import_id for card in parsed_cards if card.import_id]
-    
-    # Check for duplicate import IDs within this session
+
     import_id_counts = Counter(import_ids)
     for card in parsed_cards:
         if card.import_id and import_id_counts[card.import_id] > 1:
             card.errors.append(f"Import ID '{card.import_id}' is used by multiple cards in this import. Each card must have a unique import ID.")
-    
+
     existing_import_id_map = {}
     if import_ids:
         existing_import_id_map = {
             card.import_id: card
             for card in Card.objects.filter(user=user, import_id__in=import_ids)
         }
-    
-    # Generate sequential IDs for cards without explicit IDs
+
     used_ids = set(Card.objects.filter(import_id__isnull=False).values_list('import_id', flat=True))
-    # Include explicit IDs from this import in blocked IDs to avoid conflicts within one batch
+    # Reserve ids from this batch before filling gaps so generated ids cannot collide
+    # with explicit ids later in the same file.
     for card in parsed_cards:
         if card.import_id:
             used_ids.add(card.import_id)
 
     for card in parsed_cards:
         if not card.import_id:
-            # Find next available sequential hex ID
             next_id = 1
             while True:
                 candidate = hex(next_id)[2:].lower()
@@ -746,25 +750,25 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
                     break
                 next_id += 1
         else:
-            # Validate the provided ID format
             try:
                 int(card.import_id, 16)
             except ValueError:
                 card.errors.append(f"Invalid import ID format: '{card.import_id}'. Must be hexadecimal.")
-    
-    # Detect duplicate import_ids within this import session
+
     import_id_counts: dict[str, list[int]] = {}
     for idx, card in enumerate(parsed_cards):
         if card.import_id:
             import_id_counts.setdefault(card.import_id, []).append(idx)
-    
+
     for import_id, indices in import_id_counts.items():
         if len(indices) > 1:
             for idx in indices:
                 parsed_cards[idx].errors.append(
                     f"Duplicate import ID '{import_id}' found in this import (also used in card at index {[i for i in indices if i != idx]}). Each card must have a unique ID."
                 )
-    
+
+    # External IDs only update legacy id:: imports. Generated md_* keys may collide
+    # across separate no-id pushes and are handled as uniqueness conflicts during apply.
     external_keys = [card.external_key for card in parsed_cards]
     existing_map = {
         external.external_key: external
@@ -779,13 +783,6 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
     unchanged_count = 0
     diff_count = 0
     has_invalid_cards = False
-    source_paths = {card.source_path for card in parsed_cards if getattr(card, 'source_path', None)}
-    source_candidates: dict[str, list[Card]] = {}
-    if source_paths:
-        for candidate in Card.objects.filter(user=user, source_path__in=source_paths).select_related('deck', 'deck__parent'):
-            source_candidates.setdefault(candidate.source_path, []).append(candidate)
-    consumed_source_ids: set = set()
-
     for index, parsed in enumerate(parsed_cards):
         parsed.deck_path = _strip_root_deck(_normalise_deck_path(parsed.deck_path), deck)
         if deck is None and not parsed.deck_path:
@@ -796,41 +793,27 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
         card_warnings = []
         if card_errors:
             has_invalid_cards = True
-        external = existing_map.get(parsed.external_key)
+        external = None
+        # id:: is the legacy identity path. Marker id: wins when both are present.
+        if parsed.source_anchor and not parsed.had_explicit_import_id:
+            external = existing_map.get(parsed.external_key)
         existing_payload = None
         has_changes = False
-        fallback_card = None
         incoming_tags = list(parsed.tags)
         display_tags = incoming_tags
         display_front = _compose_front_text(parsed.front_md, parsed.context_md)
         display_back = parsed.back_md
-        if not external and parsed.source_path:
-            candidates = list(source_candidates.get(parsed.source_path, []))
-            unused = [candidate for candidate in candidates if candidate.id not in consumed_source_ids]
-            if len(unused) == 1:
-                fallback_card = unused[0]
-            else:
-                for candidate in unused:
-                    candidate_path = _strip_root_deck(candidate.deck.full_path().split('/'), deck)
-                    if candidate_path == parsed.deck_path:
-                        fallback_card = candidate
-                        break
         existing_card = None
         import_id_conflict = None
-        if parsed.import_id in existing_import_id_map:
+        if parsed.had_explicit_import_id and parsed.import_id in existing_import_id_map:
             import_id_conflict = existing_import_id_map[parsed.import_id]
             if import_id_conflict != existing_card:
-                # Different card has this import_id - this is a conflict
-                card_warnings.append(f"Import ID '{parsed.import_id}' already exists on a different card. This will update that card.")
-        
-        if external and external.card.user == user:
-            existing_card = external.card
-        elif fallback_card:
-            existing_card = fallback_card
-            consumed_source_ids.add(fallback_card.id)
-        elif import_id_conflict:
-            # Use the card with the conflicting import_id
+                card_warnings.append(f"Import ID '{parsed.import_id}' already exists. This will update that card.")
+
+        if import_id_conflict:
             existing_card = import_id_conflict
+        elif external and external.card.user == user:
+            existing_card = external.card
         if existing_card:
             display_tags = _merge_tags(existing_card.tags, incoming_tags)
             existing_payload = {
@@ -1003,6 +986,8 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
         return target, created
 
     def _unique_external_key(base_key: str) -> str:
+        # ExternalId.external_key is globally unique. When a no-id push reuses the
+        # deterministic md_* key, create a scoped variant instead of updating.
         key = base_key
         counter = 0
         while ExternalId.objects.filter(external_key=key).exists():
@@ -1041,10 +1026,19 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
 
             existing_payload = card_data.get('existing')
             if not existing_payload:
-                # If an external id already exists, treat this as an update instead of creating a duplicate.
                 raw_external_key = card_data['external_key']
                 existing_ext = ExternalId.objects.filter(external_key=raw_external_key).select_related('card').first()
-                if existing_ext and existing_ext.card and existing_ext.card.user_id == session.user_id:
+                # Keep id:: support for old imports. Generated source-location keys are
+                # bookkeeping only and must not turn a later no-id push into an update.
+                can_update_by_external = bool(card_data.get('source_anchor')) and not bool(
+                    card_data.get('had_explicit_import_id')
+                )
+                if (
+                    can_update_by_external
+                    and existing_ext
+                    and existing_ext.card
+                    and existing_ext.card.user_id == session.user_id
+                ):
                     existing_card = existing_ext.card
                     if decision in {'existing', 'skip'}:
                         summary['skipped'] += 1
@@ -1112,8 +1106,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                     )
                     continue
                 external_key = raw_external_key
-                if existing_ext and existing_ext.card and existing_ext.card.user_id != session.user_id:
-                    # Another user already owns this external id; generate a unique, user-scoped key to avoid collision.
+                if existing_ext and existing_ext.card:
                     external_key = _unique_external_key(f"{raw_external_key}__u{session.user_id}")
                 card = Card.objects.create(
                     user=session.user,

@@ -8,6 +8,7 @@ from collections import defaultdict
 from datetime import datetime, time, timedelta
 
 from django.contrib.auth import authenticate, login, logout
+from django.db import transaction
 from django.db.models import Q, Count
 from django.db.models.functions import TruncDate
 from django.http import HttpRequest, JsonResponse
@@ -16,10 +17,20 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from accounts.models import User
-from core.models import Card, Deck, Import, ImportSession, KnowledgeMap, KnowledgeNode, Review, SchedulingState
+from core.models import (
+    Card,
+    Deck,
+    Import,
+    ImportSession,
+    KnowledgeMap,
+    KnowledgeNode,
+    Review,
+    SchedulingState,
+    StudySet,
+)
 from core.scheduling import ensure_state
 from core.services.review import get_next_card, get_today_summary, grade_card_for_user
-from core.services.decks import get_deck_by_full_path
+from core.services.decks import get_deck_by_full_path, split_deck_path
 from core.services.knowledge_maps import KnowledgeMapImportError, import_knowledge_map_from_payload
 from import_anki.services import AnkiImportError, process_apkg_archive
 from import_md.services import (
@@ -142,6 +153,154 @@ def _target_deck_path(root_deck_path: str, card_payload: dict[str, Any]) -> str:
     if not deck_parts:
         return root_deck_path
     return '/'.join([root_deck_path, *deck_parts])
+
+
+def _normalise_obsidian_note_path(raw_path: Any) -> str:
+    if not isinstance(raw_path, str):
+        raise ValueError('obsidian_path must be a string')
+    path = raw_path.strip().replace('\\', '/')
+    if not path:
+        raise ValueError('obsidian_path is required')
+    if '#' in path or '^' in path:
+        raise ValueError('linked note paths must not include headings or blocks')
+    parts = [part.strip() for part in path.split('/') if part.strip()]
+    if not parts:
+        raise ValueError('obsidian_path is required')
+    if any(part in {'.', '..'} for part in parts):
+        raise ValueError('obsidian_path cannot contain relative path segments')
+    normalised = '/'.join(parts)
+    if not normalised.lower().endswith('.md'):
+        raise ValueError('linked note paths must end in .md')
+    return normalised
+
+
+def _obsidian_note_path_to_deck_path(root_deck_path: str, obsidian_path: str) -> str:
+    note_stem = obsidian_path[:-3]
+    note_parts = [part for part in note_stem.split('/') if part]
+    return '/'.join([*split_deck_path(root_deck_path), *note_parts])
+
+
+def _parse_obsidian_study_set_links(raw_links: Any) -> list[dict[str, str]]:
+    if not isinstance(raw_links, list):
+        raise ValueError('links must be a list')
+    if not raw_links:
+        raise ValueError('at least one linked markdown note is required')
+
+    links: list[dict[str, str]] = []
+    seen_paths: set[str] = set()
+    for item in raw_links:
+        if not isinstance(item, dict):
+            raise ValueError('link items must be objects')
+        obsidian_path = _normalise_obsidian_note_path(item.get('obsidian_path') or item.get('obsidianPath'))
+        if obsidian_path in seen_paths:
+            continue
+        seen_paths.add(obsidian_path)
+        link_text = str(item.get('link_text') or item.get('linkText') or obsidian_path).strip()
+        links.append(
+            {
+                'link_text': link_text or obsidian_path,
+                'obsidian_path': obsidian_path,
+            }
+        )
+    return links
+
+
+def _study_set_deck_to_dict(deck: Deck, *, obsidian_path: str, link_text: str, target_deck_path: str) -> dict:
+    return {
+        'id': deck.id,
+        'name': deck.name,
+        'full_path': deck.full_path(),
+        'obsidian_path': obsidian_path,
+        'link_text': link_text,
+        'target_deck_path': target_deck_path,
+    }
+
+
+def _study_set_to_dict(study_set: StudySet, decks: list[Deck] | None = None) -> dict:
+    selected_decks = decks if decks is not None else list(study_set.decks.all())
+    return {
+        'id': study_set.id,
+        'name': study_set.name,
+        'kind': study_set.kind,
+        'deck_ids': [deck.id for deck in selected_decks],
+        'decks': [{'id': deck.id, 'name': deck.name, 'full_path': deck.full_path()} for deck in selected_decks],
+    }
+
+
+def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tuple[dict, list[Deck], StudySet | None]:
+    name = str(payload.get('name') or '').strip()
+    root_deck_path = str(payload.get('root_deck_path') or '').strip()
+    source_path = str(payload.get('source_path') or '').strip()
+    source_hash = str(payload.get('source_hash') or '').strip()
+
+    if not name:
+        raise ValueError('name required')
+    if not root_deck_path:
+        raise ValueError('root_deck_path required')
+
+    root_deck = get_deck_by_full_path(user, root_deck_path)
+    if root_deck is None:
+        raise LookupError('root deck not found')
+
+    links = _parse_obsidian_study_set_links(payload.get('links'))
+    existing = StudySet.objects.filter(user=user, name=name, kind=StudySet.KIND_CUSTOM).order_by('id').first()
+    if existing is None:
+        existing = StudySet.objects.filter(user=user, name=name).order_by('id').first()
+
+    decks: list[Deck] = []
+    deck_payloads: list[dict] = []
+    missing: list[dict] = []
+    seen_deck_ids: set[int] = set()
+    resolved_root_path = root_deck.full_path()
+    for link in links:
+        target_deck_path = _obsidian_note_path_to_deck_path(resolved_root_path, link['obsidian_path'])
+        deck = get_deck_by_full_path(user, target_deck_path)
+        if deck is None:
+            missing.append(
+                {
+                    'link_text': link['link_text'],
+                    'obsidian_path': link['obsidian_path'],
+                    'target_deck_path': target_deck_path,
+                }
+            )
+            continue
+        if deck.id in seen_deck_ids:
+            continue
+        seen_deck_ids.add(deck.id)
+        decks.append(deck)
+        deck_payloads.append(
+            _study_set_deck_to_dict(
+                deck,
+                obsidian_path=link['obsidian_path'],
+                link_text=link['link_text'],
+                target_deck_path=target_deck_path,
+            )
+        )
+
+    errors = []
+    if not decks:
+        errors.append('No referenced decks were found.')
+    if missing:
+        errors.append('Some referenced decks do not exist in Corvus.')
+
+    preview = {
+        'name': name,
+        'source_path': source_path,
+        'source_hash': source_hash,
+        'root_deck_path': resolved_root_path,
+        'action': 'update' if existing else 'create',
+        'will_update': existing is not None,
+        'existing_study_set_id': existing.id if existing else None,
+        'has_errors': bool(errors),
+        'errors': errors,
+        'summary': {
+            'deck_count': len(deck_payloads),
+            'missing_count': len(missing),
+        },
+        'decks': deck_payloads,
+        'missing': missing,
+    }
+    return preview, decks, existing
 
 
 def _serialise_obsidian_session(session: ImportSession) -> dict[str, Any]:
@@ -882,6 +1041,84 @@ def obsidian_preview_cancel(request: HttpRequest, session_id: str) -> JsonRespon
         return _json_error(str(exc), status=404)
     cancel_markdown_session(session)
     return JsonResponse({'session_id': str(session.id), 'status': session.status})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def obsidian_study_set_preview(request: HttpRequest) -> JsonResponse:
+    try:
+        user = _require_user(request)
+    except PermissionError as exc:
+        return _json_error(str(exc), status=401)
+    try:
+        payload = _parse_json(request)
+        if not isinstance(payload, dict):
+            return _json_error('payload must be an object')
+        preview, _, _ = _build_obsidian_study_set_preview(user, payload)
+    except ValueError as exc:
+        return _json_error(str(exc))
+    except LookupError as exc:
+        return _json_error(str(exc), status=404)
+    return JsonResponse(preview)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def obsidian_study_set_apply(request: HttpRequest) -> JsonResponse:
+    try:
+        user = _require_user(request)
+    except PermissionError as exc:
+        return _json_error(str(exc), status=401)
+    try:
+        payload = _parse_json(request)
+        if not isinstance(payload, dict):
+            return _json_error('payload must be an object')
+        preview, decks, study_set = _build_obsidian_study_set_preview(user, payload)
+    except ValueError as exc:
+        return _json_error(str(exc))
+    except LookupError as exc:
+        return _json_error(str(exc), status=404)
+
+    if preview['has_errors']:
+        return JsonResponse(
+            {
+                **preview,
+                'error': 'all referenced decks must exist before applying',
+            },
+            status=400,
+        )
+
+    with transaction.atomic():
+        action = 'updated'
+        if study_set is None:
+            study_set = StudySet.objects.create(
+                user=user,
+                name=preview['name'],
+                kind=StudySet.KIND_CUSTOM,
+                deck=None,
+                tag='',
+                tags=[],
+                filenames=[],
+            )
+            action = 'created'
+        else:
+            study_set.name = preview['name']
+            study_set.kind = StudySet.KIND_CUSTOM
+            study_set.deck = None
+            study_set.tag = ''
+            study_set.tags = []
+            study_set.filenames = []
+            study_set.save(update_fields=['name', 'kind', 'deck', 'tag', 'tags', 'filenames', 'updated_at'])
+
+        study_set.decks.set(decks)
+    return JsonResponse(
+        {
+            'status': 'applied',
+            'action': action,
+            'study_set': _study_set_to_dict(study_set, decks),
+        },
+        status=201 if action == 'created' else 200,
+    )
 
 
 @csrf_exempt

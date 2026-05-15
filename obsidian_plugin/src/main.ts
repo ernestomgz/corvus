@@ -1,8 +1,9 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 
 import { CorvusClient } from "./corvus-client";
-import { collectCurrentNoteSource } from "./note-source";
+import { collectCurrentNoteSource, collectCurrentStudySetSource } from "./note-source";
 import { SyncPreviewModal } from "./preview-modal";
+import { StudySetPreviewModal } from "./study-set-modal";
 import { DEFAULT_SETTINGS, type CorvusPluginSettings } from "./types";
 import { writeBackImportIds } from "./writeback";
 
@@ -19,6 +20,14 @@ export default class CorvusSyncPlugin extends Plugin {
       name: "Sync Current Note",
       callback: async () => {
         await this.syncCurrentNote();
+      },
+    });
+
+    this.addCommand({
+      id: "create-study-preset-from-current-note",
+      name: "Create Custom Study Preset From Current Note",
+      callback: async () => {
+        await this.createStudyPresetFromCurrentNote();
       },
     });
 
@@ -92,6 +101,37 @@ export default class CorvusSyncPlugin extends Plugin {
     }
   }
 
+  async createStudyPresetFromCurrentNote(): Promise<void> {
+    try {
+      this.assertConfigured();
+      const client = new CorvusClient(this.settings);
+
+      new Notice("Preparing Corvus study preset preview...");
+      await client.login();
+
+      const source = await collectCurrentStudySetSource(this.app);
+      const preview = await client.previewStudySet(source);
+      if (preview.has_errors) {
+        new Notice("Some linked decks were not found in Corvus. Review the preview.");
+      }
+
+      const confirmed = await new StudySetPreviewModal(this.app, preview).openAndWait();
+      if (!confirmed) {
+        new Notice("Corvus study preset cancelled.");
+        return;
+      }
+
+      const result = await client.applyStudySet(source);
+      new Notice(
+        `Corvus study preset ${result.action}: ${result.study_set.name} ` +
+          `(${result.study_set.deck_ids.length} deck(s)).`,
+      );
+    } catch (error) {
+      new Notice(this.errorMessage(error, "Corvus study preset failed"));
+      console.error("Corvus study preset failed", error);
+    }
+  }
+
   private assertConfigured(): void {
     if (!this.settings.baseUrl.trim()) {
       throw new Error("Set Corvus Base URL in the plugin settings.");
@@ -107,11 +147,11 @@ export default class CorvusSyncPlugin extends Plugin {
     }
   }
 
-  private errorMessage(error: unknown): string {
+  private errorMessage(error: unknown, fallback = "Corvus sync failed"): string {
     if (error instanceof Error && error.message.trim()) {
-      return `Corvus sync failed: ${error.message}`;
+      return `${fallback}: ${error.message}`;
     }
-    return "Corvus sync failed.";
+    return `${fallback}.`;
   }
 }
 

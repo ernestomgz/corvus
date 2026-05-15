@@ -1,7 +1,7 @@
 import { App, TFile, normalizePath } from "obsidian";
 
 import { sha256Hex } from "./hash";
-import type { NoteAttachment, NoteSyncSource } from "./types";
+import type { NoteAttachment, NoteSyncSource, StudySetLinkSource, StudySetSource } from "./types";
 
 const WIKI_EMBED_RE = /!\[\[([^\]]+)\]\]/g;
 const MARKDOWN_IMAGE_RE = /!\[[^\]]*]\(([^)]+)\)/g;
@@ -17,11 +17,7 @@ const LOCAL_MEDIA_EXTENSIONS = new Set([
 ]);
 
 export async function collectCurrentNoteSource(app: App): Promise<NoteSyncSource> {
-  const file = app.workspace.getActiveFile();
-  if (!(file instanceof TFile) || file.extension !== "md") {
-    throw new Error("Open a markdown note before syncing to Corvus.");
-  }
-
+  const file = getActiveMarkdownFile(app);
   const content = await app.vault.cachedRead(file);
   const sourceHash = await sha256Hex(content);
   const attachments = await collectAttachments(app, file, content);
@@ -33,6 +29,62 @@ export async function collectCurrentNoteSource(app: App): Promise<NoteSyncSource
     sourceHash,
     attachments,
   };
+}
+
+export async function collectCurrentStudySetSource(app: App): Promise<StudySetSource> {
+  const file = getActiveMarkdownFile(app);
+  const content = await app.vault.cachedRead(file);
+  const sourceHash = await sha256Hex(content);
+  const links = collectLinkedMarkdownNotes(app, file);
+  if (links.length === 0) {
+    throw new Error("The current note does not contain any markdown note links for a Corvus study preset.");
+  }
+
+  return {
+    file,
+    name: file.basename,
+    path: file.path,
+    sourceHash,
+    links,
+  };
+}
+
+function getActiveMarkdownFile(app: App): TFile {
+  const file = app.workspace.getActiveFile();
+  if (!(file instanceof TFile) || file.extension !== "md") {
+    throw new Error("Open a markdown note before syncing to Corvus.");
+  }
+  return file;
+}
+
+function collectLinkedMarkdownNotes(app: App, noteFile: TFile): StudySetLinkSource[] {
+  const metadata = app.metadataCache.getFileCache(noteFile);
+  const links = metadata?.links ?? [];
+  const linkedNotes = new Map<string, StudySetLinkSource>();
+
+  for (const link of links) {
+    const linkText = link.link.trim();
+    const original = (link.original ?? "").trim();
+    if (!linkText || !original.startsWith("[[")) {
+      continue;
+    }
+    if (linkText.includes("#") || linkText.includes("^")) {
+      continue;
+    }
+
+    const linkedFile = app.metadataCache.getFirstLinkpathDest(linkText, noteFile.path);
+    if (!(linkedFile instanceof TFile) || linkedFile.extension !== "md") {
+      continue;
+    }
+    if (!linkedNotes.has(linkedFile.path)) {
+      linkedNotes.set(linkedFile.path, {
+        linkText,
+        obsidianPath: linkedFile.path,
+      });
+    }
+  }
+
+  return Array.from(linkedNotes.values());
 }
 
 async function collectAttachments(app: App, noteFile: TFile, content: string): Promise<NoteAttachment[]> {

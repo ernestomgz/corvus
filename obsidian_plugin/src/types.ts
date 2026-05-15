@@ -30,6 +30,19 @@ export interface NoteSyncSource {
   attachments: NoteAttachment[];
 }
 
+export interface StudySetLinkSource {
+  linkText: string;
+  obsidianPath: string;
+}
+
+export interface StudySetSource {
+  file: TFile;
+  name: string;
+  path: string;
+  sourceHash: string;
+  links: StudySetLinkSource[];
+}
+
 export interface PreviewCard {
   index: number;
   marker_line: number;
@@ -94,4 +107,53 @@ export interface ApplyResponse {
     media_copied?: number;
   };
   cards: ApplyCardResult[];
+}
+
+export interface StudySetPreviewDeck {
+  id: number;
+  name: string;
+  full_path: string;
+  obsidian_path: string;
+  link_text: string;
+  target_deck_path: string;
+}
+
+export interface StudySetPreviewMissing {
+  link_text: string;
+  obsidian_path: string;
+  target_deck_path: string;
+}
+
+export interface StudySetPreview {
+  name: string;
+  source_path: string;
+  source_hash: string;
+  root_deck_path: string;
+  action: "create" | "update";
+  will_update: boolean;
+  existing_study_set_id: number | null;
+  has_errors: boolean;
+  errors: string[];
+  summary: {
+    deck_count: number;
+    missing_count: number;
+  };
+  decks: StudySetPreviewDeck[];
+  missing: StudySetPreviewMissing[];
+}
+
+export interface StudySetApplyResponse {
+  status: string;
+  action: "created" | "updated";
+  study_set: {
+    id: number;
+    name: string;
+    kind: "custom" | string;
+    deck_ids: number[];
+    decks: Array<{
+      id: number;
+      name: string;
+      full_path: string;
+    }>;
+  };
 }

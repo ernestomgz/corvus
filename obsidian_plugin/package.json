@@ -2,7 +2,7 @@
   "name": "corvus-sync",
   "version": "0.1.0",
   "private": true,
-  "description": "Obsidian plugin for syncing the current note to Corvus.",
+  "description": "Obsidian plugin for syncing notes and creating custom study presets in Corvus.",
   "main": "main.js",
   "scripts": {
     "build": "node esbuild.config.mjs production",

@@ -6,6 +6,9 @@ import type {
   CorvusPluginSettings,
   NoteSyncSource,
   PreviewSession,
+  StudySetApplyResponse,
+  StudySetPreview,
+  StudySetSource,
 } from "./types";
 import { buildMultipartBody } from "./multipart";
 
@@ -86,6 +89,39 @@ export class CorvusClient {
     await this.requestJson(`/api/v1/obsidian/preview/${sessionId}/cancel`, {
       method: "POST",
     });
+  }
+
+  async previewStudySet(source: StudySetSource): Promise<StudySetPreview> {
+    return await this.requestJson("/api/v1/obsidian/study-set/preview", {
+      method: "POST",
+      body: JSON.stringify(this.studySetPayload(source)),
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  }
+
+  async applyStudySet(source: StudySetSource): Promise<StudySetApplyResponse> {
+    return await this.requestJson("/api/v1/obsidian/study-set/apply", {
+      method: "POST",
+      body: JSON.stringify(this.studySetPayload(source)),
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  }
+
+  private studySetPayload(source: StudySetSource): Record<string, unknown> {
+    return {
+      name: source.name,
+      source_path: source.path,
+      source_hash: source.sourceHash,
+      root_deck_path: this.settings.rootDeckPath,
+      links: source.links.map((link) => ({
+        link_text: link.linkText,
+        obsidian_path: link.obsidianPath,
+      })),
+    };
   }
 
   private async requestJson<T>(

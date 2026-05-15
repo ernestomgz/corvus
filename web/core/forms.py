@@ -248,18 +248,6 @@ class UserSettingsForm(forms.ModelForm):
             'new_card_daily_limit',
             'notifications_enabled',
             'theme',
-            'plugin_github_enabled',
-            'plugin_github_repo',
-            'plugin_github_branch',
-            'plugin_github_token',
-            'plugin_ai_enabled',
-            'plugin_ai_provider',
-            'plugin_ai_api_key',
-            'scheduled_pull_interval',
-            'max_delete_threshold',
-            'require_recent_pull_before_push',
-            'push_preview_required',
-            'metadata',
         ]
         widgets = {
             'default_deck': forms.Select(attrs={'class': 'w-full border rounded p-2'}),
@@ -267,18 +255,6 @@ class UserSettingsForm(forms.ModelForm):
             'new_card_daily_limit': forms.NumberInput(attrs={'class': 'w-full border rounded p-2', 'min': 0}),
             'notifications_enabled': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-indigo-600'}),
             'theme': forms.Select(attrs={'class': 'w-full border rounded p-2'}),
-            'plugin_github_enabled': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-indigo-600'}),
-            'plugin_github_repo': forms.TextInput(attrs={'class': 'w-full border rounded p-2', 'placeholder': 'owner/repo'}),
-            'plugin_github_branch': forms.TextInput(attrs={'class': 'w-full border rounded p-2'}),
-            'plugin_github_token': forms.PasswordInput(attrs={'class': 'w-full border rounded p-2', 'placeholder': 'Personal Access Token'}, render_value=False),
-            'plugin_ai_enabled': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-indigo-600'}),
-            'plugin_ai_provider': forms.TextInput(attrs={'class': 'w-full border rounded p-2', 'placeholder': 'openai / ollama / ...'}),
-            'plugin_ai_api_key': forms.PasswordInput(attrs={'class': 'w-full border rounded p-2', 'placeholder': 'API key'}, render_value=False),
-            'scheduled_pull_interval': forms.Select(attrs={'class': 'w-full border rounded p-2'}),
-            'max_delete_threshold': forms.NumberInput(attrs={'class': 'w-full border rounded p-2', 'min': 0}),
-            'require_recent_pull_before_push': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-indigo-600'}),
-            'push_preview_required': forms.CheckboxInput(attrs={'class': 'h-4 w-4 text-indigo-600'}),
-            'metadata': forms.Textarea(attrs={'class': 'w-full border rounded p-2 font-mono text-xs', 'rows': 4}),
         }
 
     def __init__(self, *args, user=None, **kwargs):
@@ -289,32 +265,8 @@ class UserSettingsForm(forms.ModelForm):
         else:
             self.fields['default_deck'].queryset = Deck.objects.none()
             self.fields['default_study_set'].queryset = StudySet.objects.none()
-        # Do not expose stored secrets by default.
-        self.fields['plugin_github_token'].initial = ''
-        self.fields['plugin_ai_api_key'].initial = ''
         self.fields['theme'].widget.choices = [
             ('system', 'System'),
             ('light', 'Light'),
             ('dark', 'Dark'),
         ]
-        self.fields['scheduled_pull_interval'].widget.choices = [
-            ('off', 'Off'),
-            ('hourly', 'Hourly'),
-            ('daily', 'Daily'),
-        ]
-
-    def clean_metadata(self):
-        raw = self.cleaned_data.get('metadata')
-        if not raw:
-            return {}
-        if isinstance(raw, dict):
-            return raw
-        if isinstance(raw, str):
-            try:
-                parsed = json.loads(raw)
-            except json.JSONDecodeError as exc:
-                raise forms.ValidationError(f'Metadata must be valid JSON: {exc}') from exc
-            if not isinstance(parsed, dict):
-                raise forms.ValidationError('Metadata must be a JSON object.')
-            return parsed
-        raise forms.ValidationError('Metadata must be JSON or left empty.')

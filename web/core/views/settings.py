@@ -23,14 +23,7 @@ def settings_detail(request: HttpRequest) -> HttpResponse:
     form = UserSettingsForm(request.POST or None, instance=settings_obj, user=request.user)
     if request.method == 'POST':
         if form.is_valid():
-            # Preserve existing secrets when fields left blank.
-            original = _load_settings_for_user(request.user)
-            settings_obj = form.save(commit=False)
-            if not form.cleaned_data.get('plugin_github_token'):
-                settings_obj.plugin_github_token = original.plugin_github_token
-            if not form.cleaned_data.get('plugin_ai_api_key'):
-                settings_obj.plugin_ai_api_key = original.plugin_ai_api_key
-            settings_obj.save()
+            form.save()
             messages.success(request, 'Settings saved.')
             return redirect('settings:detail')
     export_url = redirect('settings:export').url
@@ -40,7 +33,6 @@ def settings_detail(request: HttpRequest) -> HttpResponse:
         {
             'form': form,
             'export_url': export_url,
-            'settings_obj': settings_obj,
         },
     )
 

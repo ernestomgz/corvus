@@ -9,20 +9,32 @@ git clone <repo-url>
 cd Corvus
 cp .env.example .env
 # edit .env for local secrets if needed
-docker compose up --build
+docker compose up --build -d
+docker compose exec web python manage.py migrate
 ```
 
 Services:
-- Web UI & API: http://localhost:8000
+- Web UI & API: http://localhost:8001
 - PostgreSQL: localhost:5432 (`corvus` / `corvus` by default)
 
-First-time setup:
+Optional demo data:
 ```sh
-docker compose exec web python manage.py migrate
 docker compose exec web python manage.py seed_demo  # demo user + sample deck
 ```
 
 Credentials after seeding: `demo@example.com` / `demo1234`.
+
+`docker compose up --build -d` starts the containers, but it does not create Django tables by itself. On a fresh database, run `python manage.py migrate` once so Django applies the current schema to PostgreSQL.
+
+To fully reset local Docker state for this project, including the database and uploaded media volumes:
+
+```sh
+docker compose down -v --remove-orphans
+docker compose up --build -d
+docker compose exec web python manage.py migrate
+```
+
+This project is kept with clean initial migrations for fresh installs. It does not preserve old database state when you reset the Docker volumes.
 
 Ready-made import bundles live in `samples/`:
 - `sample_cards.zip` – Markdown/Logseq-style bundle with nested decks, tags, inline + block LaTeX, Obsidian media embeds, fenced code blocks, and URL examples.

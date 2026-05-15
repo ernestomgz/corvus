@@ -94,22 +94,6 @@
         {% endif %}
     </section>
 
-    <section class="rounded border bg-white p-6 shadow space-y-3">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-                <h2 class="text-lg font-semibold text-gray-800">Sync</h2>
-                <p class="text-sm text-gray-600">Manage GitHub updates and pushes from Settings.</p>
-            </div>
-            <a href="{% url 'settings:detail' %}" class="rounded border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50">Open Settings</a>
-        </div>
-        <div class="text-sm text-gray-600 space-y-1">
-            <div>Status: <span class="font-semibold">{{ user_settings.last_sync_status|default:"Idle" }}</span></div>
-            <div>Repo: <code class="font-mono text-xs bg-gray-100 px-1 rounded">{{ user_settings.plugin_github_repo|default:"not set" }}</code></div>
-            <div>Branch: <code class="font-mono text-xs bg-gray-100 px-1 rounded">{{ user_settings.plugin_github_branch|default:"update-cards-bot" }}</code></div>
-            <div class="text-xs text-gray-500">Use Settings to pull, preview, and push changes.</div>
-        </div>
-    </section>
-
     <section class="rounded border bg-white p-6 shadow space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
             <div class="flex flex-wrap items-center gap-3">

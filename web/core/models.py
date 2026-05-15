@@ -133,27 +133,6 @@ class UserSettings(models.Model):
     new_card_daily_limit = models.IntegerField(default=20)
     notifications_enabled = models.BooleanField(default=False)
     theme = models.CharField(max_length=20, default='system')
-    plugin_github_enabled = models.BooleanField(default=False)
-    plugin_github_repo = models.CharField(max_length=255, blank=True)
-    plugin_github_branch = models.CharField(max_length=255, default='update-cards-bot')
-    plugin_github_token = models.TextField(blank=True)
-    plugin_ai_enabled = models.BooleanField(default=False)
-    plugin_ai_provider = models.CharField(max_length=50, blank=True)
-    plugin_ai_api_key = models.TextField(blank=True)
-    scheduled_pull_interval = models.CharField(
-        max_length=20,
-        default='off',
-        choices=[('off', 'Off'), ('hourly', 'Hourly'), ('daily', 'Daily')],
-    )
-    max_delete_threshold = models.IntegerField(default=50)
-    require_recent_pull_before_push = models.BooleanField(default=True)
-    push_preview_required = models.BooleanField(default=True)
-    last_pull_at = models.DateTimeField(null=True, blank=True)
-    last_push_at = models.DateTimeField(null=True, blank=True)
-    last_sync_status = models.CharField(max_length=32, blank=True)
-    last_sync_error = models.TextField(blank=True)
-    last_sync_summary = models.JSONField(default=dict, blank=True)
-    metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -161,35 +140,13 @@ class UserSettings(models.Model):
         ordering = ['user_id']
 
     def to_export_payload(self) -> dict:
-        """Return a safe dict for export (excludes secrets by default)."""
+        """Return the user-controlled settings that are safe to export."""
         return {
             'default_deck_id': self.default_deck_id,
             'default_study_set_id': self.default_study_set_id,
             'new_card_daily_limit': self.new_card_daily_limit,
             'notifications_enabled': self.notifications_enabled,
             'theme': self.theme,
-            'plugin_github': {
-                'enabled': self.plugin_github_enabled,
-                'repo': self.plugin_github_repo,
-                'branch': self.plugin_github_branch,
-            },
-            'plugin_ai': {
-                'enabled': self.plugin_ai_enabled,
-                'provider': self.plugin_ai_provider,
-            },
-            'sync_policy': {
-                'scheduled_pull': self.scheduled_pull_interval,
-                'max_delete_threshold': self.max_delete_threshold,
-                'require_recent_pull_before_push': self.require_recent_pull_before_push,
-                'push_preview_required': self.push_preview_required,
-            },
-            'last_sync': {
-                'last_pull_at': self.last_pull_at.isoformat() if self.last_pull_at else None,
-                'last_push_at': self.last_push_at.isoformat() if self.last_push_at else None,
-                'status': self.last_sync_status or '',
-                'summary': self.last_sync_summary or {},
-            },
-            'metadata': self.metadata or {},
         }
 
 

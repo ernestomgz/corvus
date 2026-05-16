@@ -199,7 +199,43 @@ def test_obsidian_study_set_apply_updates_existing_preset_by_name(
     assert existing.source_paths == ['Geometry.md']
 
 
-def test_obsidian_study_set_preview_reports_unimported_notes_and_apply_rejects(
+def test_obsidian_study_set_update_replaces_sources_even_when_some_links_are_missing(
+    api_client,
+    user_factory,
+    deck_factory,
+    card_factory,
+):
+    user = user_factory()
+    root = deck_factory(user=user, name='STEM', parent=None)
+    operations_deck = deck_factory(user=user, name='Operations Deck', parent=root)
+    card_factory(user=user, deck=operations_deck, source_path='Operations.md')
+    existing = StudySet.objects.create(
+        user=user,
+        name='Math',
+        kind=StudySet.KIND_CUSTOM,
+        source_paths=['Calculus.md'],
+        source_root_deck=root,
+    )
+    api_client.force_login(user)
+
+    response = _post_json(
+        api_client,
+        '/api/v1/obsidian/study-set/apply',
+        _study_set_payload(
+            links=[
+                {'link_text': 'Operations', 'obsidian_path': 'Operations.md'},
+                {'link_text': 'Geometry', 'obsidian_path': 'Geometry.md'},
+            ]
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()['action'] == 'updated'
+    existing.refresh_from_db()
+    assert existing.source_paths == ['Operations.md']
+
+
+def test_obsidian_study_set_apply_allows_partial_missing_notes(
     api_client,
     user_factory,
     deck_factory,
@@ -221,7 +257,8 @@ def test_obsidian_study_set_preview_reports_unimported_notes_and_apply_rejects(
 
     assert preview_response.status_code == 200
     preview = preview_response.json()
-    assert preview['has_errors'] is True
+    assert preview['has_errors'] is False
+    assert preview['warnings'] == ['Some referenced notes have not been imported into Corvus.']
     assert preview['summary'] == {'source_path_count': 1, 'card_count': 1, 'missing_count': 1}
     assert preview['source_paths'][0]['source_path'] == 'Operations.md'
     assert preview['missing'] == [
@@ -231,6 +268,31 @@ def test_obsidian_study_set_preview_reports_unimported_notes_and_apply_rejects(
             'source_path': 'Geometry.md',
         }
     ]
+
+    apply_response = _post_json(api_client, '/api/v1/obsidian/study-set/apply', payload)
+    assert apply_response.status_code == 201
+    data = apply_response.json()
+    assert data['action'] == 'created'
+    assert data['study_set']['source_paths'] == ['Operations.md']
+    assert StudySet.objects.get(user=user, name='Math').source_paths == ['Operations.md']
+
+
+def test_obsidian_study_set_apply_rejects_when_no_linked_notes_are_imported(
+    api_client,
+    user_factory,
+    deck_factory,
+):
+    user = user_factory()
+    deck_factory(user=user, name='STEM', parent=None)
+    api_client.force_login(user)
+
+    payload = _study_set_payload(links=[{'link_text': 'Geometry', 'obsidian_path': 'Geometry.md'}])
+    preview_response = _post_json(api_client, '/api/v1/obsidian/study-set/preview', payload)
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert preview['has_errors'] is True
+    assert preview['errors'] == ['No imported cards were found for the referenced notes.']
+    assert preview['warnings'] == ['Some referenced notes have not been imported into Corvus.']
 
     apply_response = _post_json(api_client, '/api/v1/obsidian/study-set/apply', payload)
     assert apply_response.status_code == 400

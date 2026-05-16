@@ -285,10 +285,11 @@ def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tu
         )
 
     errors = []
+    warnings = []
     if not source_payloads:
         errors.append('No imported cards were found for the referenced notes.')
     if missing:
-        errors.append('Some referenced notes have not been imported into Corvus.')
+        warnings.append('Some referenced notes have not been imported into Corvus.')
 
     preview = {
         'name': name,
@@ -300,6 +301,7 @@ def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tu
         'existing_study_set_id': existing.id if existing else None,
         'has_errors': bool(errors),
         'errors': errors,
+        'warnings': warnings,
         'summary': {
             'source_path_count': len(source_payloads),
             'card_count': sum(item['card_count'] for item in source_payloads),

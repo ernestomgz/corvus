@@ -111,7 +111,7 @@ export default class CorvusSyncPlugin extends Plugin {
 
       const source = await collectCurrentStudySetSource(this.app);
       const preview = await client.previewStudySet(source);
-      if (preview.has_errors) {
+      if (preview.missing.length > 0) {
         new Notice("Some linked notes have not been imported into Corvus. Review the preview.");
       }
 

@@ -133,6 +133,7 @@ export interface StudySetPreview {
   existing_study_set_id: number | null;
   has_errors: boolean;
   errors: string[];
+  warnings?: string[];
   summary: {
     source_path_count: number;
     card_count: number;

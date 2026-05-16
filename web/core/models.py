@@ -82,10 +82,17 @@ class StudySet(models.Model):
     name = models.CharField(max_length=255)
     kind = models.CharField(max_length=20, choices=KIND_CHOICES)
     deck = models.ForeignKey(Deck, null=True, blank=True, on_delete=models.CASCADE, related_name='study_sets')
+    source_root_deck = models.ForeignKey(
+        Deck,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='source_scoped_study_sets',
+    )
     tag = models.CharField(max_length=255, blank=True)
     decks = models.ManyToManyField(Deck, blank=True, related_name='custom_study_sets')
     tags = ArrayField(models.TextField(), blank=True, default=list)
-    filenames = ArrayField(models.TextField(), blank=True, default=list)
+    source_paths = ArrayField(models.TextField(), blank=True, default=list)
     is_favorite = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -117,8 +124,10 @@ class StudySet(models.Model):
                 parts.append(f"Decks: {', '.join(deck_names)}")
             if self.tags:
                 parts.append(f"Tags: {', '.join(self.tags)}")
-            if self.filenames:
-                parts.append(f"Files: {', '.join(self.filenames)}")
+            if self.source_paths:
+                parts.append(f"Sources: {', '.join(self.source_paths)}")
+            if self.source_root_deck:
+                parts.append(f"Root: {self.source_root_deck.full_path()}")
             return f"{self.name} ({'; '.join(parts)})"
         return self.name
 

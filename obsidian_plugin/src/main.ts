@@ -112,7 +112,7 @@ export default class CorvusSyncPlugin extends Plugin {
       const source = await collectCurrentStudySetSource(this.app);
       const preview = await client.previewStudySet(source);
       if (preview.has_errors) {
-        new Notice("Some linked decks were not found in Corvus. Review the preview.");
+        new Notice("Some linked notes have not been imported into Corvus. Review the preview.");
       }
 
       const confirmed = await new StudySetPreviewModal(this.app, preview).openAndWait();
@@ -124,7 +124,7 @@ export default class CorvusSyncPlugin extends Plugin {
       const result = await client.applyStudySet(source);
       new Notice(
         `Corvus study preset ${result.action}: ${result.study_set.name} ` +
-          `(${result.study_set.deck_ids.length} deck(s)).`,
+          `(${result.study_set.source_paths.length} source note(s)).`,
       );
     } catch (error) {
       new Notice(this.errorMessage(error, "Corvus study preset failed"));

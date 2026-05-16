@@ -30,7 +30,7 @@ from core.models import (
 )
 from core.scheduling import ensure_state
 from core.services.review import get_next_card, get_today_summary, grade_card_for_user
-from core.services.decks import get_deck_by_full_path, split_deck_path
+from core.services.decks import get_deck_by_full_path
 from core.services.knowledge_maps import KnowledgeMapImportError, import_knowledge_map_from_payload
 from import_anki.services import AnkiImportError, process_apkg_archive
 from import_md.services import (
@@ -92,6 +92,7 @@ def _card_to_dict(card: Card) -> dict:
         'id': str(card.id),
         'import_id': card.import_id,
         'deck_id': card.deck_id,
+        'deck_full_path': card.deck.full_path() if card.deck_id else '',
         'front_md': card.front_md,
         'back_md': card.back_md,
         'tags': card.tags,
@@ -174,12 +175,6 @@ def _normalise_obsidian_note_path(raw_path: Any) -> str:
     return normalised
 
 
-def _obsidian_note_path_to_deck_path(root_deck_path: str, obsidian_path: str) -> str:
-    note_stem = obsidian_path[:-3]
-    note_parts = [part for part in note_stem.split('/') if part]
-    return '/'.join([*split_deck_path(root_deck_path), *note_parts])
-
-
 def _parse_obsidian_study_set_links(raw_links: Any) -> list[dict[str, str]]:
     if not isinstance(raw_links, list):
         raise ValueError('links must be a list')
@@ -205,14 +200,18 @@ def _parse_obsidian_study_set_links(raw_links: Any) -> list[dict[str, str]]:
     return links
 
 
-def _study_set_deck_to_dict(deck: Deck, *, obsidian_path: str, link_text: str, target_deck_path: str) -> dict:
+def _study_set_source_to_dict(
+    *,
+    obsidian_path: str,
+    link_text: str,
+    cards: list[Card],
+) -> dict:
     return {
-        'id': deck.id,
-        'name': deck.name,
-        'full_path': deck.full_path(),
         'obsidian_path': obsidian_path,
+        'source_path': obsidian_path,
         'link_text': link_text,
-        'target_deck_path': target_deck_path,
+        'card_count': len(cards),
+        'deck_paths': sorted({card.deck.full_path() for card in cards}),
     }
 
 
@@ -224,6 +223,9 @@ def _study_set_to_dict(study_set: StudySet, decks: list[Deck] | None = None) -> 
         'kind': study_set.kind,
         'deck_ids': [deck.id for deck in selected_decks],
         'decks': [{'id': deck.id, 'name': deck.name, 'full_path': deck.full_path()} for deck in selected_decks],
+        'source_paths': list(study_set.source_paths),
+        'source_root_deck_id': study_set.source_root_deck_id,
+        'source_root_deck_path': study_set.source_root_deck.full_path() if study_set.source_root_deck_id else '',
     }
 
 
@@ -248,40 +250,45 @@ def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tu
         existing = StudySet.objects.filter(user=user, name=name).order_by('id').first()
 
     decks: list[Deck] = []
-    deck_payloads: list[dict] = []
+    source_payloads: list[dict] = []
     missing: list[dict] = []
-    seen_deck_ids: set[int] = set()
+    source_paths = [link['obsidian_path'] for link in links]
     resolved_root_path = root_deck.full_path()
+    allowed_deck_ids = set(root_deck.descendant_ids(include_self=True))
+    cards_by_source_path: dict[str, list[Card]] = {path: [] for path in source_paths}
+    matching_cards = (
+        Card.objects.filter(user=user, source_path__in=source_paths, deck_id__in=allowed_deck_ids)
+        .select_related('deck')
+        .order_by('deck__name', 'created_at')
+    )
+    for card in matching_cards:
+        if card.source_path in cards_by_source_path:
+            cards_by_source_path[card.source_path].append(card)
+
     for link in links:
-        target_deck_path = _obsidian_note_path_to_deck_path(resolved_root_path, link['obsidian_path'])
-        deck = get_deck_by_full_path(user, target_deck_path)
-        if deck is None:
+        cards = cards_by_source_path.get(link['obsidian_path'], [])
+        if not cards:
             missing.append(
                 {
                     'link_text': link['link_text'],
                     'obsidian_path': link['obsidian_path'],
-                    'target_deck_path': target_deck_path,
+                    'source_path': link['obsidian_path'],
                 }
             )
             continue
-        if deck.id in seen_deck_ids:
-            continue
-        seen_deck_ids.add(deck.id)
-        decks.append(deck)
-        deck_payloads.append(
-            _study_set_deck_to_dict(
-                deck,
+        source_payloads.append(
+            _study_set_source_to_dict(
                 obsidian_path=link['obsidian_path'],
                 link_text=link['link_text'],
-                target_deck_path=target_deck_path,
+                cards=cards,
             )
         )
 
     errors = []
-    if not decks:
-        errors.append('No referenced decks were found.')
+    if not source_payloads:
+        errors.append('No imported cards were found for the referenced notes.')
     if missing:
-        errors.append('Some referenced decks do not exist in Corvus.')
+        errors.append('Some referenced notes have not been imported into Corvus.')
 
     preview = {
         'name': name,
@@ -294,10 +301,11 @@ def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tu
         'has_errors': bool(errors),
         'errors': errors,
         'summary': {
-            'deck_count': len(deck_payloads),
+            'source_path_count': len(source_payloads),
+            'card_count': sum(item['card_count'] for item in source_payloads),
             'missing_count': len(missing),
         },
-        'decks': deck_payloads,
+        'source_paths': source_payloads,
         'missing': missing,
     }
     return preview, decks, existing
@@ -1083,13 +1091,14 @@ def obsidian_study_set_apply(request: HttpRequest) -> JsonResponse:
         return JsonResponse(
             {
                 **preview,
-                'error': 'all referenced decks must exist before applying',
+                'error': 'all referenced notes must be imported before applying',
             },
             status=400,
         )
 
     with transaction.atomic():
         action = 'updated'
+        source_paths = [item['source_path'] for item in preview['source_paths']]
         if study_set is None:
             study_set = StudySet.objects.create(
                 user=user,
@@ -1098,17 +1107,30 @@ def obsidian_study_set_apply(request: HttpRequest) -> JsonResponse:
                 deck=None,
                 tag='',
                 tags=[],
-                filenames=[],
+                source_paths=source_paths,
+                source_root_deck=root_deck,
             )
             action = 'created'
         else:
             study_set.name = preview['name']
             study_set.kind = StudySet.KIND_CUSTOM
             study_set.deck = None
+            study_set.source_root_deck = root_deck
             study_set.tag = ''
             study_set.tags = []
-            study_set.filenames = []
-            study_set.save(update_fields=['name', 'kind', 'deck', 'tag', 'tags', 'filenames', 'updated_at'])
+            study_set.source_paths = source_paths
+            study_set.save(
+                update_fields=[
+                    'name',
+                    'kind',
+                    'deck',
+                    'source_root_deck',
+                    'tag',
+                    'tags',
+                    'source_paths',
+                    'updated_at',
+                ]
+            )
 
         study_set.decks.set(decks)
     return JsonResponse(

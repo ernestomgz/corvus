@@ -127,7 +127,7 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 (
-                    'filenames',
+                    'source_paths',
                     django.contrib.postgres.fields.ArrayField(
                         base_field=models.TextField(),
                         blank=True,
@@ -145,6 +145,16 @@ class Migration(migrations.Migration):
                         null=True,
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name='study_sets',
+                        to='core.deck',
+                    ),
+                ),
+                (
+                    'source_root_deck',
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name='source_scoped_study_sets',
                         to='core.deck',
                     ),
                 ),

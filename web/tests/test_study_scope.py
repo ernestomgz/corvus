@@ -45,7 +45,7 @@ def test_custom_study_set_or_logic():
     study_set = StudySetFactory(user=user, kind=StudySet.KIND_CUSTOM)
     study_set.decks.set([deck1])
     study_set.tags = ['tag2']
-    study_set.filenames = ['file3.md']
+    study_set.source_paths = ['file3.md']
     study_set.save()
 
     from core.services.review import StudyScope, _scoped_states
@@ -62,9 +62,30 @@ def test_custom_study_set_or_logic():
 def test_custom_study_set_empty():
     user = UserFactory()
     study_set = StudySetFactory(user=user, kind=StudySet.KIND_CUSTOM)
-    # No decks, tags, or filenames
+    # No decks, tags, or source paths
 
     from core.services.review import StudyScope, _scoped_states
     scope = StudyScope.from_study_set(study_set)
     states = _scoped_states(user, scope=scope)
     assert states.count() == 0
+
+
+def test_custom_study_set_source_paths_can_be_limited_to_root_deck():
+    user = UserFactory()
+    root = DeckFactory(user=user, name='STEM')
+    root_child = DeckFactory(user=user, name='Science', parent=root)
+    other_root = DeckFactory(user=user, name='Other')
+    matching = CardFactory(user=user, deck=root_child, source_path='Operations.md')
+    outside_root = CardFactory(user=user, deck=other_root, source_path='Operations.md')
+
+    study_set = StudySetFactory(user=user, kind=StudySet.KIND_CUSTOM)
+    study_set.source_paths = ['Operations.md']
+    study_set.source_root_deck = root
+    study_set.save()
+
+    from core.services.review import StudyScope, _scoped_states
+    scope = StudyScope.from_study_set(study_set)
+    card_ids = set(_scoped_states(user, scope=scope).values_list('card_id', flat=True))
+
+    assert matching.id in card_ids
+    assert outside_root.id not in card_ids

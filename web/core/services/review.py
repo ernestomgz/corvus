@@ -40,7 +40,8 @@ class StudyScope:
     study_set: Optional[StudySet] = None
     decks: list[Deck] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
-    filenames: list[str] = field(default_factory=list)
+    source_paths: list[str] = field(default_factory=list)
+    source_root_deck: Optional[Deck] = None
 
     @classmethod
     def from_deck(cls, deck: Deck | None):
@@ -61,7 +62,8 @@ class StudyScope:
                 study_set=study_set,
                 decks=list(study_set.decks.all()),
                 tags=study_set.tags,
-                filenames=study_set.filenames,
+                source_paths=study_set.source_paths,
+                source_root_deck=study_set.source_root_deck,
             )
         return cls(study_set=study_set)
 
@@ -111,7 +113,7 @@ def _scoped_states(user, deck: Optional[Deck] = None, scope: Optional[StudyScope
         if tag_value:
             qs = qs.filter(card__tags__contains=[tag_value])
         # Handle custom scope
-        if resolved_scope.decks or resolved_scope.tags or resolved_scope.filenames:
+        if resolved_scope.decks or resolved_scope.tags or resolved_scope.source_paths:
             q_objects = Q()
             if resolved_scope.decks:
                 deck_ids = set()
@@ -121,8 +123,11 @@ def _scoped_states(user, deck: Optional[Deck] = None, scope: Optional[StudyScope
             if resolved_scope.tags:
                 for tag in resolved_scope.tags:
                     q_objects |= Q(card__tags__contains=[tag])
-            if resolved_scope.filenames:
-                q_objects |= Q(card__source_path__in=resolved_scope.filenames)
+            if resolved_scope.source_paths:
+                source_path_filter = Q(card__source_path__in=resolved_scope.source_paths)
+                if resolved_scope.source_root_deck:
+                    source_path_filter &= Q(card__deck_id__in=resolved_scope.source_root_deck.descendant_ids())
+                q_objects |= source_path_filter
             qs = qs.filter(q_objects)
     return qs
 

@@ -17,7 +17,7 @@ def summarize_study_sets(user, study_sets: Iterable[StudySet]) -> dict[int, Toda
 
 def fetch_study_sets_with_summaries(user) -> Tuple[list[StudySet], dict[int, TodaySummary]]:
     study_sets = list(
-        StudySet.objects.for_user(user).select_related('deck').order_by('-is_favorite', 'name')
+        StudySet.objects.for_user(user).select_related('deck', 'source_root_deck').order_by('-is_favorite', 'name')
     )
     summaries = summarize_study_sets(user, study_sets)
     return study_sets, summaries

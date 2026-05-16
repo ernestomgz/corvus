@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from ..forms import CardFilterForm, CardForm
 from ..models import Card
-from ..services.decks import flatten_deck_ids
+from ..scheduling import ensure_state
 
 
 @login_required
@@ -31,7 +31,12 @@ def card_list(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def card_detail(request: HttpRequest, pk) -> HttpResponse:
-    card = get_object_or_404(Card.objects.select_related('deck', 'scheduling_state'), pk=pk, user=request.user)
+    card = get_object_or_404(
+        Card.objects.select_related('deck', 'scheduling_state').prefetch_related('external_ids'),
+        pk=pk,
+        user=request.user,
+    )
+    ensure_state(card)
     return render(request, 'core/cards/detail.html', {'card': card})
 
 

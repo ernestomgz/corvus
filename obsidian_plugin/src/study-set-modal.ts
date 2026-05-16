@@ -30,27 +30,31 @@ export class StudySetPreviewModal extends Modal {
     summaryEl.createEl("div", { text: `Preset: ${this.preview.name}` });
     summaryEl.createEl("div", { text: `Root deck: ${this.preview.root_deck_path}` });
     summaryEl.createEl("div", {
-      text: `${this.preview.will_update ? "Update" : "Create"} preset with ${this.preview.summary.deck_count} deck(s)`,
+      text:
+        `${this.preview.will_update ? "Update" : "Create"} preset with ` +
+        `${this.preview.summary.source_path_count} source note(s), ${this.preview.summary.card_count} card(s)`,
     });
 
-    if (this.preview.decks.length > 0) {
-      const decksEl = contentEl.createDiv({ cls: "corvus-preview-decks" });
-      decksEl.createEl("strong", { text: "Resolved decks" });
-      const list = decksEl.createEl("ul");
-      for (const deck of this.preview.decks) {
+    if (this.preview.source_paths.length > 0) {
+      const sourcesEl = contentEl.createDiv({ cls: "corvus-preview-decks" });
+      sourcesEl.createEl("strong", { text: "Imported source notes" });
+      const list = sourcesEl.createEl("ul");
+      for (const sourcePath of this.preview.source_paths) {
         list.createEl("li", {
-          text: `${deck.obsidian_path} -> ${deck.full_path}`,
+          text:
+            `${sourcePath.obsidian_path} -> ${sourcePath.source_path} ` +
+            `(${sourcePath.card_count} card(s), ${sourcePath.deck_paths.join(", ")})`,
         });
       }
     }
 
     if (this.preview.missing.length > 0) {
       const missingEl = contentEl.createDiv({ cls: "corvus-preview-errors" });
-      missingEl.createEl("strong", { text: "Missing decks" });
+      missingEl.createEl("strong", { text: "Not imported yet" });
       const list = missingEl.createEl("ul");
       for (const missing of this.preview.missing) {
         list.createEl("li", {
-          text: `${missing.obsidian_path} -> ${missing.target_deck_path}`,
+          text: `${missing.obsidian_path} -> ${missing.source_path}`,
         });
       }
     }

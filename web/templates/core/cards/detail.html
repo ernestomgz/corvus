@@ -24,13 +24,33 @@
         </div>
         <div>
             <h2 class="text-lg font-semibold text-gray-700">Metadata</h2>
-            <dl class="grid gap-1 text-sm text-gray-600">
-                <div class="flex justify-between"><dt class="font-medium">Tags</dt><dd>{{ card.tags|join:', ' }}</dd></div>
-                {% if card.import_id %}<div class="flex justify-between"><dt class="font-medium">ID</dt><dd class="font-mono">{{ card.import_id }} <button onclick="navigator.clipboard.writeText('{{ card.import_id }}')" class="ml-2 text-xs text-blue-600 hover:text-blue-800" title="Copy ID">📋</button></dd></div>{% endif %}
-                <div class="flex justify-between"><dt class="font-medium">Queue</dt><dd>{{ card.scheduling_state.queue_status }}</dd></div>
-                <div class="flex justify-between"><dt class="font-medium">Due</dt><dd>{{ card.scheduling_state.due_at|date:'Y-m-d H:i' }}</dd></div>
-                <div class="flex justify-between"><dt class="font-medium">Ease</dt><dd>{{ card.scheduling_state.ease }}</dd></div>
-                <div class="flex justify-between"><dt class="font-medium">Interval</dt><dd>{{ card.scheduling_state.interval_days }} day(s)</dd></div>
+            <dl class="grid gap-2 text-sm text-gray-600">
+                <div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Card UUID</dt><dd class="break-all font-mono">{{ card.id }}</dd></div>
+                {% if card.import_id %}<div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Import ID</dt><dd class="font-mono">{{ card.import_id }} <button onclick="navigator.clipboard.writeText('{{ card.import_id }}')" class="ml-2 text-xs text-blue-600 hover:text-blue-800" title="Copy import ID">Copy</button></dd></div>{% endif %}
+                <div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Deck</dt><dd>{{ card.deck.full_path }}</dd></div>
+                {% if card.source_path %}<div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Source note</dt><dd class="break-all font-mono">{{ card.source_path }}</dd></div>{% endif %}
+                {% if card.source_anchor %}<div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Source anchor</dt><dd class="break-all font-mono">{{ card.source_anchor }}</dd></div>{% endif %}
+                <div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Tags</dt><dd>{% if card.tags %}{{ card.tags|join:', ' }}{% else %}None{% endif %}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Media</dt><dd>{{ card.media|length }} item(s)</dd></div>
+                {% if card.external_ids.exists %}
+                    <div class="grid gap-1 sm:grid-cols-[9rem_1fr]">
+                        <dt class="font-medium">External IDs</dt>
+                        <dd class="space-y-1">
+                            {% for external_id in card.external_ids.all %}
+                                <div><span class="font-medium">{{ external_id.system }}</span>: <span class="break-all font-mono">{{ external_id.external_key }}</span></div>
+                            {% endfor %}
+                        </dd>
+                    </div>
+                {% endif %}
+                <div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Created</dt><dd>{{ card.created_at|date:'Y-m-d H:i' }}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Updated</dt><dd>{{ card.updated_at|date:'Y-m-d H:i' }}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Queue</dt><dd>{{ card.scheduling_state.queue_status }}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Due</dt><dd>{{ card.scheduling_state.due_at|date:'Y-m-d H:i'|default:'Not scheduled' }}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Ease</dt><dd>{{ card.scheduling_state.ease }}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Interval</dt><dd>{{ card.scheduling_state.interval_days }} day(s)</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Reviews</dt><dd>{{ card.scheduling_state.reps }}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Lapses</dt><dd>{{ card.scheduling_state.lapses }}</dd></div>
+                {% if card.scheduling_state.last_rating is not None %}<div class="grid gap-1 sm:grid-cols-[9rem_1fr]"><dt class="font-medium">Last rating</dt><dd>{{ card.scheduling_state.last_rating }}</dd></div>{% endif %}
             </dl>
         </div>
     </div>

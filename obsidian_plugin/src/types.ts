@@ -109,19 +109,18 @@ export interface ApplyResponse {
   cards: ApplyCardResult[];
 }
 
-export interface StudySetPreviewDeck {
-  id: number;
-  name: string;
-  full_path: string;
+export interface StudySetPreviewSourcePath {
   obsidian_path: string;
+  source_path: string;
   link_text: string;
-  target_deck_path: string;
+  card_count: number;
+  deck_paths: string[];
 }
 
 export interface StudySetPreviewMissing {
   link_text: string;
   obsidian_path: string;
-  target_deck_path: string;
+  source_path: string;
 }
 
 export interface StudySetPreview {
@@ -135,10 +134,11 @@ export interface StudySetPreview {
   has_errors: boolean;
   errors: string[];
   summary: {
-    deck_count: number;
+    source_path_count: number;
+    card_count: number;
     missing_count: number;
   };
-  decks: StudySetPreviewDeck[];
+  source_paths: StudySetPreviewSourcePath[];
   missing: StudySetPreviewMissing[];
 }
 
@@ -150,6 +150,9 @@ export interface StudySetApplyResponse {
     name: string;
     kind: "custom" | string;
     deck_ids: number[];
+    source_paths: string[];
+    source_root_deck_id: number | null;
+    source_root_deck_path: string;
     decks: Array<{
       id: number;
       name: string;

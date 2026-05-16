@@ -229,7 +229,7 @@ def _study_set_to_dict(study_set: StudySet, decks: list[Deck] | None = None) -> 
     }
 
 
-def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tuple[dict, list[Deck], StudySet | None]:
+def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tuple[dict, list[Deck], StudySet | None, Deck]:
     name = str(payload.get('name') or '').strip()
     root_deck_path = str(payload.get('root_deck_path') or '').strip()
     source_path = str(payload.get('source_path') or '').strip()
@@ -308,7 +308,7 @@ def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tu
         'source_paths': source_payloads,
         'missing': missing,
     }
-    return preview, decks, existing
+    return preview, decks, existing, root_deck
 
 
 def _serialise_obsidian_session(session: ImportSession) -> dict[str, Any]:
@@ -1062,7 +1062,7 @@ def obsidian_study_set_preview(request: HttpRequest) -> JsonResponse:
         payload = _parse_json(request)
         if not isinstance(payload, dict):
             return _json_error('payload must be an object')
-        preview, _, _ = _build_obsidian_study_set_preview(user, payload)
+        preview, _, _, _ = _build_obsidian_study_set_preview(user, payload)
     except ValueError as exc:
         return _json_error(str(exc))
     except LookupError as exc:
@@ -1081,7 +1081,7 @@ def obsidian_study_set_apply(request: HttpRequest) -> JsonResponse:
         payload = _parse_json(request)
         if not isinstance(payload, dict):
             return _json_error('payload must be an object')
-        preview, decks, study_set = _build_obsidian_study_set_preview(user, payload)
+        preview, decks, study_set, root_deck = _build_obsidian_study_set_preview(user, payload)
     except ValueError as exc:
         return _json_error(str(exc))
     except LookupError as exc:

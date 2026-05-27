@@ -82,7 +82,7 @@ export default class CorvusSyncPlugin extends Plugin {
       }
 
       const result = await client.applyPreview(preview.session_id, source.sourceHash, decisions);
-      const writeCount = await writeBackImportIds(this.app, source.file, preview, result);
+      const writeCount = await writeBackImportIds(this.app, source, preview, result);
 
       new Notice(
         `Corvus sync finished. Created ${result.summary.created}, updated ${result.summary.updated}, ` +

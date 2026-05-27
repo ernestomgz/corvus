@@ -537,7 +537,7 @@ def test_import_long_card_supports_fenced_code_block_blank_lines(user_factory, d
 
 
 
-def test_import_updates_merge_tags(user_factory, deck_factory):
+def test_import_updates_replace_tags(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)
     markdown = '#card Fact\nid:: merge_demo\ntags:: math\n\nAnswer'
@@ -553,7 +553,7 @@ def test_import_updates_merge_tags(user_factory, deck_factory):
     record2 = process_markdown_archive(user=user, deck=deck, uploaded_file=updated_archive)
     assert record2.summary['updated'] == 1
     card.refresh_from_db()
-    assert card.tags == ['math', 'custom', 'spaced']
+    assert card.tags == ['spaced']
 
 
 def test_md_same_line_marker_does_not_include_previous_marker(user_factory, deck_factory):
@@ -1157,6 +1157,65 @@ def test_tags_parsing_with_comma_separator(user_factory, deck_factory):
     assert 'foo' in card.tags
     assert 'bar' in card.tags
     assert 'baz' in card.tags
+
+
+def test_frontmatter_card_tags_apply_to_all_cards(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        '---\n'
+        'card-tags:\n'
+        '  - calculus\n'
+        '  - exam\n'
+        '---\n'
+        'First question\n'
+        '#card\n'
+        'First answer\n'
+        '\n'
+        'Second question\n'
+        '#card\n'
+        'tags:: practice\n'
+        'Second answer'
+    )
+    archive = _build_zip({'note.md': markdown})
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+
+    assert record.summary['created'] == 2
+    cards = list(Card.objects.filter(user=user).order_by('front_md'))
+    assert cards[0].tags == ['calculus', 'exam']
+    assert cards[1].tags == ['calculus', 'exam', 'practice']
+
+
+def test_frontmatter_card_tags_replace_on_update(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    initial_markdown = (
+        '---\n'
+        'card-tags: calculus, exam\n'
+        '---\n'
+        'Question\n'
+        '#card id:abc1\n'
+        'Answer'
+    )
+    updated_markdown = (
+        '---\n'
+        'card-tags:\n'
+        '  - algebra\n'
+        '---\n'
+        'Updated question\n'
+        '#card id:abc1\n'
+        'Updated answer'
+    )
+
+    process_markdown_archive(user=user, deck=deck, uploaded_file=_build_zip({'note.md': initial_markdown}))
+    card = Card.objects.get(user=user)
+    assert card.tags == ['calculus', 'exam']
+
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=_build_zip({'note.md': updated_markdown}))
+    card.refresh_from_db()
+    assert record.summary['updated'] == 1
+    assert card.tags == ['algebra']
+    assert card.front_md == 'Updated question'
 
 
 def test_tags_replace_on_update(user_factory, deck_factory):

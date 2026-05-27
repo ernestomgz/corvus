@@ -22,11 +22,19 @@ export interface NoteAttachment {
   data: ArrayBuffer;
 }
 
+export interface NoteSyncFile {
+  file: TFile;
+  path: string;
+  content: string;
+  sourceHash: string;
+}
+
 export interface NoteSyncSource {
   file: TFile;
   path: string;
   content: string;
   sourceHash: string;
+  files: NoteSyncFile[];
   attachments: NoteAttachment[];
 }
 
@@ -50,6 +58,7 @@ export interface PreviewCard {
   import_id: string | null;
   front_md: string;
   back_md: string;
+  source_path: string;
   existing: boolean;
   existing_card_id: string | null;
   has_changes: boolean;
@@ -93,6 +102,7 @@ export interface ApplyCardResult {
   card_id: string | null;
   marker_line: number | null;
   marker_kind: "card" | "reverse" | string | null;
+  source_path: string | null;
 }
 
 export interface ApplyResponse {

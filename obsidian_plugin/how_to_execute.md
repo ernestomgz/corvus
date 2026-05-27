@@ -95,6 +95,43 @@ Corvus Sync: Sync Current Note
 
 If Corvus creates new cards without source IDs, the plugin writes those IDs back into the note.
 
+## Supported Frontmatter
+
+The plugin and Corvus only check these kebab-case frontmatter keys. Other frontmatter keys can remain in your notes; they are ignored by Corvus.
+
+- `questions-source`: read by the Obsidian plugin. It must contain one or more Obsidian wiki links to markdown notes. The plugin resolves those links with Obsidian and includes the referenced note(s) in the same sync preview.
+- `card-tags`: read by Corvus. These tags are applied to every card imported from that markdown file.
+
+Example with one question source note:
+
+```md
+---
+created: 2026-05-23T16:03
+last-modified: 2026-05-23T16:03
+questions-source: "[[Questions Even and Odd functions]]"
+card-tags:
+  - calculus
+  - exam
+---
+
+Even and odd functions
+#card
+Definitions and examples
+```
+
+Example with multiple question source notes:
+
+```md
+---
+questions-source:
+  - "[[Questions Limits]]"
+  - "[[Questions Derivatives]]"
+card-tags: calculus, practice
+---
+```
+
+`questions-source` links must point to notes. Links to headings or blocks, such as `[[Questions#Section]]` or `[[Questions^block]]`, are rejected.
+
 
 ## Development Loop
 
@@ -121,6 +158,6 @@ This plugin expects these Corvus endpoints to exist:
 
 ## Notes
 
-- The plugin syncs only the current note.
+- The plugin syncs the current note and any markdown notes referenced by its `questions-source` frontmatter.
 - Corvus remains responsible for markdown parsing, preview generation, media handling, and deck creation below the configured root.
 - If the note changes after preview, the plugin refuses to write IDs back and asks you to run sync again.

@@ -61,6 +61,56 @@ This text is outside the card.
 
 ## IDs And Tags
 
+### YAML Frontmatter
+
+Corvus reads a small set of kebab-case YAML frontmatter keys. Unknown keys are allowed and ignored.
+
+Checked keys:
+
+- `card-tags`: imported by Corvus. Tags listed here are applied to every card parsed from that Markdown file.
+
+`card-tags` can be a YAML list:
+
+```md
+---
+card-tags:
+  - calculus
+  - exam
+---
+
+Derivative of x^2
+#card
+2x
+```
+
+or a comma/semicolon-separated string:
+
+```md
+---
+card-tags: calculus, exam
+---
+
+Derivative of sin(x)
+#card
+cos(x)
+```
+
+Card-level `tags::` lines are still supported and are combined with `card-tags`:
+
+```md
+---
+card-tags:
+  - calculus
+---
+
+Derivative of e^x
+#card
+tags:: exam
+e^x
+```
+
+On update, imported tags are replaced by the current imported tags. Removing a tag from frontmatter removes it from the updated card.
+
 Inline IDs are supported:
 
 ```md

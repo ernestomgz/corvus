@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import yaml
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
@@ -213,6 +214,43 @@ def _merge_tags(existing: list[str] | None, incoming: list[str] | None) -> list[
     return merged
 
 
+def _normalise_frontmatter_tags(raw: object) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return _normalise_tags(raw)
+    if isinstance(raw, (list, tuple)):
+        unique: list[str] = []
+        for item in raw:
+            for tag in _normalise_tags(str(item)):
+                if tag not in unique:
+                    unique.append(tag)
+        return unique
+    return _normalise_tags(str(raw))
+
+
+def _split_frontmatter(content: str) -> tuple[str, dict, int]:
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != '---':
+        return content, {}, 0
+
+    for index in range(1, len(lines)):
+        if lines[index].strip() in {'---', '...'}:
+            raw_frontmatter = '\n'.join(lines[1:index])
+            try:
+                parsed = yaml.safe_load(raw_frontmatter) if raw_frontmatter.strip() else {}
+            except yaml.YAMLError as exc:
+                raise MarkdownImportError(f'Invalid YAML frontmatter: {exc}') from exc
+            if parsed is None:
+                parsed = {}
+            if not isinstance(parsed, dict):
+                raise MarkdownImportError('YAML frontmatter must be a mapping')
+            body = '\n'.join(lines[index + 1 :])
+            return body, parsed, index + 1
+
+    return content, {}, 0
+
+
 def _build_marker_resolver(user) -> MarkerResolver:
     lookup = {rule.token: rule for rule in FIXED_MARKER_RULES}
     unique_tokens = [rule.token for rule in FIXED_MARKER_RULES]
@@ -411,6 +449,8 @@ def _parse_markdown_cards(
     resolver: MarkerResolver,
     deck_path: list[str] | None = None,
 ) -> List[ParsedCard]:
+    content, frontmatter, line_offset = _split_frontmatter(content)
+    file_tags = _normalise_frontmatter_tags(frontmatter.get('card-tags'))
     lines = content.splitlines()
     parsed_cards: list[ParsedCard] = []
     deck_parts = _normalise_deck_path(list(deck_path or []))
@@ -424,7 +464,7 @@ def _parse_markdown_cards(
             i += 1
             continue
 
-        line_no = i + 1
+        line_no = line_offset + i + 1
         marker_start = marker_match.start()
         marker_end = marker_match.end()
         marker_text = (marker_match.group('marker') or '').lower()
@@ -486,7 +526,7 @@ def _parse_markdown_cards(
                 front_content = heading_stack[-1][1]
         i += 1
         anchor = None
-        tags: list[str] = []
+        tags: list[str] = list(file_tags)
         card_errors: list[str] = []
         source_dir_path = Path(source_path).parent
         source_dir = source_dir_path.as_posix()
@@ -502,7 +542,7 @@ def _parse_markdown_cards(
         if i < len(lines):
             tags_match = TAGS_PATTERN.match(lines[i])
             if tags_match:
-                tags = _normalise_tags(tags_match.group('tags'))
+                tags = _merge_tags(file_tags, _normalise_tags(tags_match.group('tags')))
                 i += 1
         while i < len(lines) and not lines[i].strip():
             i += 1
@@ -710,6 +750,39 @@ def _build_uploaded_archive_from_note(
     return SimpleUploadedFile(filename, buffer.read(), content_type='application/zip')
 
 
+def _build_uploaded_archive_from_notes(
+    *,
+    notes: list[dict[str, str]],
+    attachments: dict[str, bytes] | None = None,
+):
+    if not notes:
+        raise MarkdownImportError('at least one markdown note is required')
+
+    normalised_notes: list[tuple[str, str]] = []
+    seen_paths: set[str] = set()
+    for note in notes:
+        normalised_source_path = _normalise_archive_member_path(note.get('source_path') or note.get('path') or '')
+        if not normalised_source_path.lower().endswith('.md'):
+            raise MarkdownImportError('source_path must end with .md')
+        if normalised_source_path in seen_paths:
+            raise MarkdownImportError(f"duplicate source_path '{normalised_source_path}'")
+        seen_paths.add(normalised_source_path)
+        normalised_notes.append((normalised_source_path, note.get('content') or ''))
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as zf:
+        for source_path, content in normalised_notes:
+            zf.writestr(source_path, content)
+        for attachment_path, data in sorted((attachments or {}).items()):
+            normalised_attachment_path = _normalise_archive_member_path(attachment_path)
+            if normalised_attachment_path in seen_paths:
+                raise MarkdownImportError('attachment path conflicts with source_path')
+            zf.writestr(normalised_attachment_path, data)
+    buffer.seek(0)
+    filename = f"{Path(normalised_notes[0][0]).stem or 'notes'}.zip"
+    return SimpleUploadedFile(filename, buffer.read(), content_type='application/zip')
+
+
 def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> ImportSession:
     resolver = _build_marker_resolver(user)
     parsed_cards, parse_summary = _collect_markdown_cards(
@@ -815,7 +888,7 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
         elif external and external.card.user == user:
             existing_card = external.card
         if existing_card:
-            display_tags = _merge_tags(existing_card.tags, incoming_tags)
+            display_tags = incoming_tags
             existing_payload = {
                 'card_id': str(existing_card.id),
                 'deck_id': existing_card.deck_id,
@@ -905,10 +978,28 @@ def prepare_markdown_note_session(
     attachments: dict[str, bytes] | None = None,
     source_hash: str = '',
 ) -> ImportSession:
-    normalised_source_path = _normalise_archive_member_path(source_path)
-    uploaded_file = _build_uploaded_archive_from_note(
-        source_path=normalised_source_path,
-        content=content,
+    return prepare_markdown_notes_session(
+        user=user,
+        root_deck=root_deck,
+        notes=[{'source_path': source_path, 'content': content}],
+        primary_source_path=source_path,
+        attachments=attachments,
+        source_hash=source_hash,
+    )
+
+
+def prepare_markdown_notes_session(
+    *,
+    user,
+    root_deck: Deck,
+    notes: list[dict[str, str]],
+    primary_source_path: str,
+    attachments: dict[str, bytes] | None = None,
+    source_hash: str = '',
+) -> ImportSession:
+    normalised_source_path = _normalise_archive_member_path(primary_source_path)
+    uploaded_file = _build_uploaded_archive_from_notes(
+        notes=notes,
         attachments=attachments,
     )
     session = prepare_markdown_session(user=user, deck=root_deck, uploaded_file=uploaded_file)
@@ -1009,6 +1100,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                         'card_id': (card_data.get('existing') or {}).get('card_id'),
                         'marker_line': card_data.get('marker_line'),
                         'marker_kind': card_data.get('marker_kind'),
+                        'source_path': card_data.get('source_path'),
                     }
                 )
                 continue
@@ -1050,6 +1142,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                                 'card_id': str(existing_card.id),
                                 'marker_line': card_data.get('marker_line'),
                                 'marker_kind': card_data.get('marker_kind'),
+                                'source_path': card_data.get('source_path'),
                             }
                         )
                         continue
@@ -1089,6 +1182,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                             'card_id': str(existing_card.id),
                             'marker_line': card_data.get('marker_line'),
                             'marker_kind': card_data.get('marker_kind'),
+                            'source_path': card_data.get('source_path'),
                         }
                     )
                     continue
@@ -1102,6 +1196,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                             'card_id': None,
                             'marker_line': card_data.get('marker_line'),
                             'marker_kind': card_data.get('marker_kind'),
+                            'source_path': card_data.get('source_path'),
                         }
                     )
                     continue
@@ -1134,6 +1229,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                         'card_id': str(card.id),
                         'marker_line': card_data.get('marker_line'),
                         'marker_kind': card_data.get('marker_kind'),
+                        'source_path': card_data.get('source_path'),
                     }
                 )
                 continue
@@ -1152,6 +1248,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                             'card_id': None,
                             'marker_line': card_data.get('marker_line'),
                             'marker_kind': card_data.get('marker_kind'),
+                            'source_path': card_data.get('source_path'),
                         }
                     )
                     continue
@@ -1180,6 +1277,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                         'card_id': str(card.id),
                         'marker_line': card_data.get('marker_line'),
                         'marker_kind': card_data.get('marker_kind'),
+                        'source_path': card_data.get('source_path'),
                     }
                 )
                 continue
@@ -1194,6 +1292,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                         'card_id': str(existing_card.id),
                         'marker_line': card_data.get('marker_line'),
                         'marker_kind': card_data.get('marker_kind'),
+                        'source_path': card_data.get('source_path'),
                     }
                 )
                 continue
@@ -1237,6 +1336,7 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                     'card_id': str(existing_card.id),
                     'marker_line': card_data.get('marker_line'),
                     'marker_kind': card_data.get('marker_kind'),
+                    'source_path': card_data.get('source_path'),
                 }
             )
 

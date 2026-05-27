@@ -4,7 +4,6 @@ from django.utils import timezone
 from accounts.models import User
 from core.models import Card, Deck
 from core.scheduling import ensure_state
-from core.services.card_types import resolve_card_type
 
 
 class Command(BaseCommand):
@@ -31,13 +30,11 @@ class Command(BaseCommand):
         ]
         created_cards = 0
         for front, back in samples:
-            type_slug = 'cloze' if '{{' in front else ('problem' if front.lower().startswith('problem') else 'basic')
-            card_type = resolve_card_type(user, type_slug)
             card, created_card = Card.objects.get_or_create(
                 user=user,
                 deck=deck,
                 front_md=front,
-                defaults={'back_md': back, 'card_type': card_type},
+                defaults={'back_md': back},
             )
             ensure_state(card)
             if created_card:

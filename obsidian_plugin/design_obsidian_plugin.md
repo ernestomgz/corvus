@@ -9,7 +9,7 @@ The plugin should stay small. Corvus should remain responsible for markdown pars
 This version is push-only:
 
 - sync only the current note
-- support only `#card` and `#card-reverse`
+- support only `#card`, `#card-reverse`, `#long-card`, and `#long-card-reverse`
 - require approval before any write
 - treat Obsidian IDs as the source of truth
 - write newly assigned Corvus IDs back into the note after apply
@@ -121,7 +121,7 @@ That is clearer, easier to validate, and easier to evolve.
 ## Corvus responsibilities
 
 - Parse markdown note content
-- Detect `#card` and `#card-reverse`
+- Detect `#card`, `#card-reverse`, `#long-card`, and `#long-card-reverse`
 - Extract and validate import IDs
 - Build card previews and diffs
 - Determine create vs update vs unchanged
@@ -141,6 +141,10 @@ Version 1 supports only these marker forms:
 - `#card id:<value>`
 - `#card-reverse`
 - `#card-reverse id:<value>`
+- `#long-card`
+- `#long-card id:<value>`
+- `#long-card-reverse`
+- `#long-card-reverse id:<value>`
 
 The ID format should remain hexadecimal, aligned with Corvus `import_id`.
 
@@ -519,6 +523,8 @@ Minimal edit rules:
 
 - `#card` becomes `#card id:<newid>`
 - `#card-reverse` becomes `#card-reverse id:<newid>`
+- `#long-card` becomes `#long-card id:<newid>`
+- `#long-card-reverse` becomes `#long-card-reverse id:<newid>`
 - do not rewrite surrounding text
 - do not reorder content
 - do not touch existing IDs

@@ -21,7 +21,18 @@
                                     <span class="text-amber-500 text-sm" aria-label="Pinned">★</span>
                                 {% endif %}
                             </h3>
-                            <p class="text-sm text-gray-500">Due {{ summary.due_count|default:0 }} · Review {{ summary.review_count|default:0 }} · New {{ summary.new_count|default:0 }}</p>
+                            {% if study_set.kind == 'custom' %}
+                                <p class="text-xs text-gray-500">
+                                    {{ study_set.decks.count }} deck(s), {{ study_set.tags|length }} tag(s), {{ study_set.source_paths|length }} source note(s)
+                                </p>
+                                {% if study_set.source_paths %}
+                                    <p class="mt-1 max-w-xl truncate text-xs font-mono text-gray-500">{{ study_set.source_paths|join:', ' }}</p>
+                                {% endif %}
+                                {% if study_set.source_paths and study_set.source_root_deck %}
+                                    <p class="text-xs text-gray-500">Source root: {{ study_set.source_root_deck.full_path }}</p>
+                                {% endif %}
+                            {% endif %}
+                            <p class="text-sm text-gray-500">Due {{ summary.due_count|default:0 }} / Review {{ summary.review_count|default:0 }} / New {{ summary.new_count|default:0 }}</p>
                         </div>
                         <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                             <a href="{% url 'review:study' %}?study_set_id={{ study_set.id }}" class="inline-flex items-center justify-center rounded bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800">Start</a>

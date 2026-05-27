@@ -257,7 +257,7 @@ def test_md_card_marker_variations(user_factory, deck_factory):
 def test_md_card_reverse_marker_creates_reverse_copy(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)
-    markdown = "## Capital of France #card/reverse\nParis"
+    markdown = "## Capital of France #card-reverse\nParis"
     archive = _build_zip({'world.md': markdown})
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     assert record.summary['created'] == 2
@@ -408,15 +408,14 @@ def test_markdown_inline_card_in_list(user_factory, deck_factory):
     assert cards[0].front_md.splitlines()[0] == 'Completing Squares > Standard Forms'
 
 
-def test_import_uses_card_type_marker(user_factory, deck_factory):
+def test_import_ignores_unsupported_markers(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)
     markdown = "## Identify plant #photo-card\n![](attachments/leaf.png)\n\nLeaf shape meaning"
     archive = _build_zip({'Media/note.md': markdown}, media={'Media/attachments/leaf.png': b'image-bytes'})
-    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
-    assert record.summary['created'] == 1
-    card = Card.objects.get(user=user)
-    assert card.card_type.slug == 'photo'
+    with pytest.raises(MarkdownImportError):
+        process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    assert Card.objects.filter(user=user).count() == 0
 
 
 def test_import_long_card_preserves_single_blank_lines(user_factory, deck_factory):
@@ -438,7 +437,6 @@ def test_import_long_card_preserves_single_blank_lines(user_factory, deck_factor
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     assert record.summary['created'] == 1
     card = Card.objects.get(user=user)
-    assert card.card_type.slug == 'long-card'
     assert card.front_md == 'Question line 1\nQuestion line 2'
     assert card.back_md == 'response line 1\nresponse line 2\n\nresponse line 3\nend of response'
 
@@ -461,7 +459,6 @@ def test_import_long_card_with_id_and_heading_context_and_update(user_factory, d
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     assert record.summary['created'] == 1
     card = Card.objects.get(user=user)
-    assert card.card_type.slug == 'long-card'
     assert card.import_id == '123'
     # Hierarchy should be in front, followed by the question
     lines = card.front_md.split('\n')
@@ -532,7 +529,6 @@ def test_import_long_card_supports_fenced_code_block_blank_lines(user_factory, d
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     assert record.summary['created'] == 1
     card = Card.objects.get(user=user)
-    assert card.card_type.slug == 'long-card'
     assert 'code line 1' in card.back_md
     assert 'code line 2' in card.back_md
     assert 'code line 3' in card.back_md
@@ -1079,10 +1075,38 @@ def test_reverse_card_with_hyphen_separator(user_factory, deck_factory):
     assert cards[1].back_md == 'Front'
 
 
-def test_reverse_card_disallowed_when_option_set(user_factory, deck_factory):
-    """Test that reverse flag is ignored when card type has allow_reverse=False."""
-    # This would require custom card type - skipping for now as it's advanced
-    pass
+def test_long_card_reverse_creates_reverse_copy(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        'Prompt line\n'
+        '#long-card-reverse\n'
+        'Answer paragraph 1\n'
+        '\n'
+        'Answer paragraph 2\n'
+        '\n'
+        '\n'
+        'Outside card\n'
+    )
+    archive = _build_zip({'note.md': markdown})
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+
+    assert record.summary['created'] == 2
+    cards = Card.objects.filter(user=user).order_by('created_at')
+    assert cards[0].front_md == 'Prompt line'
+    assert cards[0].back_md == 'Answer paragraph 1\n\nAnswer paragraph 2'
+    assert cards[1].front_md == 'Answer paragraph 1\n\nAnswer paragraph 2'
+    assert cards[1].back_md == 'Prompt line'
+
+
+def test_slash_reverse_marker_is_not_supported(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    archive = _build_zip({'note.md': 'Front\n#card/reverse\nBack'})
+
+    with pytest.raises(MarkdownImportError):
+        process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    assert Card.objects.filter(user=user).count() == 0
 
 
 def test_reverse_card_preserves_media(user_factory, deck_factory, settings):
@@ -1090,7 +1114,7 @@ def test_reverse_card_preserves_media(user_factory, deck_factory, settings):
     user = user_factory()
     deck = deck_factory(user=user)
     image_bytes = b'image-data'
-    markdown = 'Image #card/reverse\n![](image.png)'
+    markdown = 'Image #card-reverse\n![](image.png)'
     archive = _build_zip({'note.md': markdown}, media={'image.png': image_bytes})
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     

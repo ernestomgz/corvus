@@ -7,7 +7,6 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Q
 from django.utils import timezone
 
 from .knowledge_tags import build_knowledge_tag
@@ -16,63 +15,6 @@ from .knowledge_tags import build_knowledge_tag
 class UserScopedQuerySet(models.QuerySet):
     def for_user(self, user: settings.AUTH_USER_MODEL) -> "UserScopedQuerySet":
         return self.filter(user=user)
-
-
-class CardType(models.Model):
-    id = models.BigAutoField(primary_key=True)
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='card_types',
-        null=True,
-        blank=True,
-    )
-    name = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=64)
-    description = models.TextField(blank=True)
-    field_schema = models.JSONField(default=list, blank=True)
-    front_template = models.TextField()
-    back_template = models.TextField()
-    created_at = models.DateTimeField(default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    objects = UserScopedQuerySet.as_manager()
-
-    class Meta:
-        ordering = ['name']
-        constraints = [
-            models.UniqueConstraint(fields=['user', 'slug'], name='unique_card_type_per_user'),
-            models.UniqueConstraint(
-                fields=['slug'],
-                condition=models.Q(user__isnull=True),
-                name='unique_global_card_type_slug',
-            ),
-        ]
-
-    def __str__(self) -> str:
-        owner = getattr(self.user, 'email', None) or 'global'
-        return f"{self.name} ({owner})"
-
-
-class CardImportFormat(models.Model):
-    FORMAT_CHOICES = [
-        ('markdown', 'Markdown'),
-    ]
-
-    id = models.BigAutoField(primary_key=True)
-    card_type = models.ForeignKey(CardType, on_delete=models.CASCADE, related_name='import_formats')
-    name = models.CharField(max_length=255)
-    format_kind = models.CharField(max_length=32, choices=FORMAT_CHOICES)
-    template = models.TextField()
-    options = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ['name']
-
-    def __str__(self) -> str:
-        return f"{self.card_type.name}: {self.name}"
 
 
 class Deck(models.Model):
@@ -140,10 +82,17 @@ class StudySet(models.Model):
     name = models.CharField(max_length=255)
     kind = models.CharField(max_length=20, choices=KIND_CHOICES)
     deck = models.ForeignKey(Deck, null=True, blank=True, on_delete=models.CASCADE, related_name='study_sets')
+    source_root_deck = models.ForeignKey(
+        Deck,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='source_scoped_study_sets',
+    )
     tag = models.CharField(max_length=255, blank=True)
     decks = models.ManyToManyField(Deck, blank=True, related_name='custom_study_sets')
     tags = ArrayField(models.TextField(), blank=True, default=list)
-    filenames = ArrayField(models.TextField(), blank=True, default=list)
+    source_paths = ArrayField(models.TextField(), blank=True, default=list)
     is_favorite = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -175,8 +124,10 @@ class StudySet(models.Model):
                 parts.append(f"Decks: {', '.join(deck_names)}")
             if self.tags:
                 parts.append(f"Tags: {', '.join(self.tags)}")
-            if self.filenames:
-                parts.append(f"Files: {', '.join(self.filenames)}")
+            if self.source_paths:
+                parts.append(f"Sources: {', '.join(self.source_paths)}")
+            if self.source_root_deck:
+                parts.append(f"Root: {self.source_root_deck.full_path()}")
             return f"{self.name} ({'; '.join(parts)})"
         return self.name
 
@@ -191,27 +142,6 @@ class UserSettings(models.Model):
     new_card_daily_limit = models.IntegerField(default=20)
     notifications_enabled = models.BooleanField(default=False)
     theme = models.CharField(max_length=20, default='system')
-    plugin_github_enabled = models.BooleanField(default=False)
-    plugin_github_repo = models.CharField(max_length=255, blank=True)
-    plugin_github_branch = models.CharField(max_length=255, default='update-cards-bot')
-    plugin_github_token = models.TextField(blank=True)
-    plugin_ai_enabled = models.BooleanField(default=False)
-    plugin_ai_provider = models.CharField(max_length=50, blank=True)
-    plugin_ai_api_key = models.TextField(blank=True)
-    scheduled_pull_interval = models.CharField(
-        max_length=20,
-        default='off',
-        choices=[('off', 'Off'), ('hourly', 'Hourly'), ('daily', 'Daily')],
-    )
-    max_delete_threshold = models.IntegerField(default=50)
-    require_recent_pull_before_push = models.BooleanField(default=True)
-    push_preview_required = models.BooleanField(default=True)
-    last_pull_at = models.DateTimeField(null=True, blank=True)
-    last_push_at = models.DateTimeField(null=True, blank=True)
-    last_sync_status = models.CharField(max_length=32, blank=True)
-    last_sync_error = models.TextField(blank=True)
-    last_sync_summary = models.JSONField(default=dict, blank=True)
-    metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -219,35 +149,13 @@ class UserSettings(models.Model):
         ordering = ['user_id']
 
     def to_export_payload(self) -> dict:
-        """Return a safe dict for export (excludes secrets by default)."""
+        """Return the user-controlled settings that are safe to export."""
         return {
             'default_deck_id': self.default_deck_id,
             'default_study_set_id': self.default_study_set_id,
             'new_card_daily_limit': self.new_card_daily_limit,
             'notifications_enabled': self.notifications_enabled,
             'theme': self.theme,
-            'plugin_github': {
-                'enabled': self.plugin_github_enabled,
-                'repo': self.plugin_github_repo,
-                'branch': self.plugin_github_branch,
-            },
-            'plugin_ai': {
-                'enabled': self.plugin_ai_enabled,
-                'provider': self.plugin_ai_provider,
-            },
-            'sync_policy': {
-                'scheduled_pull': self.scheduled_pull_interval,
-                'max_delete_threshold': self.max_delete_threshold,
-                'require_recent_pull_before_push': self.require_recent_pull_before_push,
-                'push_preview_required': self.push_preview_required,
-            },
-            'last_sync': {
-                'last_pull_at': self.last_pull_at.isoformat() if self.last_pull_at else None,
-                'last_push_at': self.last_push_at.isoformat() if self.last_push_at else None,
-                'status': self.last_sync_status or '',
-                'summary': self.last_sync_summary or {},
-            },
-            'metadata': self.metadata or {},
         }
 
 
@@ -354,11 +262,9 @@ class Card(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='cards')
     deck = models.ForeignKey(Deck, on_delete=models.CASCADE, related_name='cards')
-    card_type = models.ForeignKey(CardType, on_delete=models.PROTECT, related_name='cards')
     front_md = models.TextField()
     back_md = models.TextField()
     tags = ArrayField(models.TextField(), blank=True, default=list)
-    field_values = models.JSONField(default=dict, blank=True)
     source_path = models.TextField(null=True, blank=True)
     source_anchor = models.TextField(null=True, blank=True)
     media = models.JSONField(default=list)
@@ -376,8 +282,7 @@ class Card(models.Model):
         ordering = ['-updated_at']
 
     def __str__(self) -> str:
-        type_name = getattr(self.card_type, 'name', '')
-        return f"{type_name}: {self.front_md[:40]}"
+        return self.front_md[:40]
 
     def add_tag(self, tag: str) -> None:
         normalised = tag.strip()

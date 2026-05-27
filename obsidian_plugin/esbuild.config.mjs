@@ -4,7 +4,7 @@ import process from "node:process";
 const production = process.argv.includes("production");
 
 const ctx = await esbuild.context({
-  entryPoints: ["src/main.ts"],
+  entryPoints: ["./src/main.ts"],
   bundle: true,
   format: "cjs",
   target: "es2020",

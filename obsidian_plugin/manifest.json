@@ -3,7 +3,7 @@
   "name": "Corvus Sync",
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Sync the current note to Corvus using server-side preview and apply sessions.",
+  "description": "Sync notes and create custom study presets in Corvus.",
   "author": "OpenAI Codex",
   "authorUrl": "https://openai.com",
   "isDesktopOnly": true

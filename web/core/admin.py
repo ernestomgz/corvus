@@ -2,8 +2,6 @@ from django.contrib import admin
 
 from .models import (
     Card,
-    CardImportFormat,
-    CardType,
     Deck,
     ExternalId,
     Import,
@@ -12,20 +10,6 @@ from .models import (
     Review,
     SchedulingState,
 )
-
-
-class CardImportFormatInline(admin.TabularInline):
-    model = CardImportFormat
-    extra = 0
-    show_change_link = True
-
-
-@admin.register(CardType)
-class CardTypeAdmin(admin.ModelAdmin):
-    list_display = ('name', 'slug', 'user', 'created_at', 'updated_at')
-    search_fields = ('name', 'slug')
-    list_filter = ('user',)
-    inlines = [CardImportFormatInline]
 
 
 @admin.register(Deck)
@@ -37,9 +21,9 @@ class DeckAdmin(admin.ModelAdmin):
 
 @admin.register(Card)
 class CardAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'deck', 'card_type', 'created_at', 'updated_at')
+    list_display = ('id', 'user', 'deck', 'created_at', 'updated_at')
     search_fields = ('front_md', 'back_md')
-    list_filter = ('user', 'deck', 'card_type')
+    list_filter = ('user', 'deck')
 
 
 @admin.register(SchedulingState)

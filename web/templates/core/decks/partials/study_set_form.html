@@ -24,7 +24,7 @@
             {% if study_set_form.tag.errors %}<p class="text-xs text-red-600">{{ study_set_form.tag.errors.0 }}</p>{% endif %}
         </div>
         <div id="custom-fields" class="space-y-1" style="display: none;">
-            <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Select decks, tags, or files (use search to filter)</p>
+            <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Select decks, tags, or source notes (use search to filter)</p>
             <div class="space-y-2">
                 <div>
                     {{ study_set_form.decks.label_tag }}
@@ -43,12 +43,12 @@
                     {% if study_set_form.tags.errors %}<p class="text-xs text-red-600">{{ study_set_form.tags.errors.0 }}</p>{% endif %}
                 </div>
                 <div>
-                    {{ study_set_form.filenames.label_tag }}
-                    <input type="text" placeholder="Search files..." class="search-input w-full border rounded p-2 mb-1" data-target="filenames-container">
-                    <div id="filenames-container" class="max-h-32 overflow-y-auto border rounded p-2 bg-white">
-                        {{ study_set_form.filenames }}
+                    {{ study_set_form.source_paths.label_tag }}
+                    <input type="text" placeholder="Search source notes..." class="search-input w-full border rounded p-2 mb-1" data-target="source-paths-container">
+                    <div id="source-paths-container" class="max-h-32 overflow-y-auto border rounded p-2 bg-white">
+                        {{ study_set_form.source_paths }}
                     </div>
-                    {% if study_set_form.filenames.errors %}<p class="text-xs text-red-600">{{ study_set_form.filenames.errors.0 }}</p>{% endif %}
+                    {% if study_set_form.source_paths.errors %}<p class="text-xs text-red-600">{{ study_set_form.source_paths.errors.0 }}</p>{% endif %}
                 </div>
             </div>
         </div>

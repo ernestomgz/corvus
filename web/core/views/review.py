@@ -10,7 +10,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 
-from ..models import Card, Deck, Review, SchedulingState, StudySet, UserSettings
+from ..models import Card, Deck, Review, SchedulingState, StudySet
 from ..scheduling import ensure_state
 from ..services.review import (
     StudyScope,
@@ -174,10 +174,6 @@ def _build_dashboard_context(request: HttpRequest, *, scope: Optional[StudyScope
     available_years = {int(year) for year in review_years.union(due_years) if year is not None}
     available_years.update({current_year, selected_year})
     year_options = sorted(available_years, reverse=True) or [current_year]
-    try:
-        user_settings = request.user.settings  # type: ignore[attr-defined]
-    except (UserSettings.DoesNotExist, AttributeError):  # pragma: no cover - defensive
-        user_settings = None
     context = {
         'decks': decks,
         'active_deck': deck,
@@ -189,7 +185,6 @@ def _build_dashboard_context(request: HttpRequest, *, scope: Optional[StudyScope
         'selected_year': selected_year,
         'user_selected_year': bool(selected_year_raw),
         'active_scope': scope,
-        'user_settings': user_settings,
     }
     return context
 

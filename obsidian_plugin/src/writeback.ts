@@ -1,24 +1,28 @@
-import { App } from "obsidian";
+import { App, TFile } from "obsidian";
 
 import { sha256Hex } from "./hash";
-import type { ApplyResponse, NoteSyncSource, PreviewSession } from "./types";
+import type { ApplyResponse, PreviewSession } from "./types";
 
 interface WritebackGroup {
   line: number;
   cardId: string | null;
   reverseId: string | null;
-  sourcePath: string;
 }
 
 export async function writeBackImportIds(
   app: App,
-  source: NoteSyncSource,
+  file: TFile,
   preview: PreviewSession,
   result: ApplyResponse,
 ): Promise<number> {
+  const currentContent = await app.vault.cachedRead(file);
+  const currentHash = await sha256Hex(currentContent);
+  if (currentHash !== preview.source_hash) {
+    throw new Error("The note changed after preview. Run the sync again before writing IDs.");
+  }
+
   const previewByIndex = new Map(preview.cards.map((card) => [card.index, card]));
-  const sourceFiles = new Map(source.files.map((file) => [file.path, file]));
-  const grouped = new Map<string, WritebackGroup>();
+  const grouped = new Map<number, WritebackGroup>();
 
   for (const applied of result.cards) {
     const previewCard = previewByIndex.get(applied.index);
@@ -28,64 +32,41 @@ export async function writeBackImportIds(
     if (typeof applied.marker_line !== "number") {
       continue;
     }
-    const sourcePath = applied.source_path ?? previewCard.source_path ?? source.path;
-    const groupKey = `${sourcePath}:${applied.marker_line}`;
-    const group = grouped.get(groupKey) ?? {
+    const group = grouped.get(applied.marker_line) ?? {
       line: applied.marker_line,
       cardId: null,
       reverseId: null,
-      sourcePath,
     };
     if (applied.marker_kind === "reverse") {
       group.reverseId = applied.import_id;
     } else {
       group.cardId = applied.import_id;
     }
-    grouped.set(groupKey, group);
+    grouped.set(applied.marker_line, group);
   }
 
   if (grouped.size === 0) {
     return 0;
   }
 
+  const lines = currentContent.split(/\r?\n/);
+  const groups = Array.from(grouped.values()).sort((a, b) => b.line - a.line);
   let writes = 0;
-  const groupsBySource = new Map<string, WritebackGroup[]>();
-  for (const group of grouped.values()) {
-    const groups = groupsBySource.get(group.sourcePath) ?? [];
-    groups.push(group);
-    groupsBySource.set(group.sourcePath, groups);
+
+  for (const group of groups) {
+    const index = group.line - 1;
+    if (index < 0 || index >= lines.length) {
+      throw new Error(`Cannot write back ID for marker line ${group.line}.`);
+    }
+    const updated = replaceMarkerLine(lines[index], group);
+    if (updated !== lines[index]) {
+      lines[index] = updated;
+      writes += 1;
+    }
   }
 
-  for (const [sourcePath, groups] of groupsBySource.entries()) {
-    const sourceFile = sourceFiles.get(sourcePath);
-    if (!sourceFile) {
-      throw new Error(`Cannot write back IDs for unknown source note ${sourcePath}.`);
-    }
-
-    const currentContent = await app.vault.cachedRead(sourceFile.file);
-    const currentHash = await sha256Hex(currentContent);
-    if (currentHash !== sourceFile.sourceHash) {
-      throw new Error(`The note ${sourcePath} changed after preview. Run the sync again before writing IDs.`);
-    }
-
-    const lines = currentContent.split(/\r?\n/);
-    let fileWrites = 0;
-    for (const group of groups.sort((a, b) => b.line - a.line)) {
-      const index = group.line - 1;
-      if (index < 0 || index >= lines.length) {
-        throw new Error(`Cannot write back ID for marker line ${group.line} in ${sourcePath}.`);
-      }
-      const updated = replaceMarkerLine(lines[index], group);
-      if (updated !== lines[index]) {
-        lines[index] = updated;
-        fileWrites += 1;
-      }
-    }
-
-    if (fileWrites > 0) {
-      await app.vault.modify(sourceFile.file, lines.join("\n"));
-      writes += fileWrites;
-    }
+  if (writes > 0) {
+    await app.vault.modify(file, lines.join("\n"));
   }
 
   return writes;

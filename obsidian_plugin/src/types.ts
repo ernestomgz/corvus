@@ -22,19 +22,11 @@ export interface NoteAttachment {
   data: ArrayBuffer;
 }
 
-export interface NoteSyncFile {
-  file: TFile;
-  path: string;
-  content: string;
-  sourceHash: string;
-}
-
 export interface NoteSyncSource {
   file: TFile;
   path: string;
   content: string;
   sourceHash: string;
-  files: NoteSyncFile[];
   attachments: NoteAttachment[];
 }
 

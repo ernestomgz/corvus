@@ -148,6 +148,38 @@ def test_obsidian_study_set_apply_creates_custom_preset_with_source_paths(
     assert study_set.source_paths == ['Operations.md', 'Calculus.md']
 
 
+def test_obsidian_study_set_apply_accepts_main_and_question_source_paths(
+    api_client,
+    user_factory,
+    deck_factory,
+    card_factory,
+):
+    user = user_factory()
+    root = deck_factory(user=user, name='STEM', parent=None)
+    function_deck = deck_factory(user=user, name='Function Deck', parent=root)
+    question_deck = deck_factory(user=user, name='Questions Deck', parent=root)
+    card_factory(user=user, deck=function_deck, source_path='Function.md')
+    card_factory(user=user, deck=question_deck, source_path='Questions Function.md')
+    api_client.force_login(user)
+
+    response = _post_json(
+        api_client,
+        '/api/v1/obsidian/study-set/apply',
+        _study_set_payload(
+            name='Test preset',
+            links=[
+                {'link_text': 'Function', 'obsidian_path': 'Function.md'},
+                {'link_text': 'Questions Function', 'obsidian_path': 'Questions Function.md'},
+            ],
+        ),
+    )
+
+    assert response.status_code == 201
+    assert response.json()['study_set']['source_paths'] == ['Function.md', 'Questions Function.md']
+    study_set = StudySet.objects.get(user=user, name='Test preset')
+    assert study_set.source_paths == ['Function.md', 'Questions Function.md']
+
+
 def test_obsidian_study_set_apply_updates_existing_preset_by_name(
     api_client,
     user_factory,

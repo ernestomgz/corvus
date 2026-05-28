@@ -37,7 +37,7 @@ from import_md.services import (
     MarkdownImportError,
     apply_markdown_session,
     cancel_markdown_session,
-    prepare_markdown_notes_session,
+    prepare_markdown_note_session,
     process_markdown_archive,
 )
 
@@ -145,62 +145,6 @@ def _extract_obsidian_attachments(request: HttpRequest) -> dict[str, bytes]:
             raise ValueError(f"attachment file missing for field '{item['field']}'")
         attachments[item['path']] = upload.read()
     return attachments
-
-
-def _normalise_obsidian_upload_path(raw_path: str) -> str:
-    parts = [part.strip() for part in raw_path.replace('\\', '/').split('/') if part.strip()]
-    if not parts or any(part in {'.', '..'} for part in parts):
-        raise ValueError('note paths must be relative vault paths')
-    return '/'.join(parts)
-
-
-def _parse_note_manifest(raw_manifest: str | None) -> list[dict[str, str]]:
-    if not raw_manifest:
-        return []
-    try:
-        payload = json.loads(raw_manifest)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f'Invalid note_manifest: {exc}') from exc
-    if not isinstance(payload, list):
-        raise ValueError('note_manifest must be a JSON list')
-
-    manifest: list[dict[str, str]] = []
-    seen_paths: set[str] = set()
-    for item in payload:
-        if not isinstance(item, dict):
-            raise ValueError('note_manifest items must be objects')
-        field = item.get('field')
-        path = item.get('path')
-        if not isinstance(field, str) or not field.strip():
-            raise ValueError('note_manifest items require a non-empty field')
-        if not isinstance(path, str) or not path.strip():
-            raise ValueError('note_manifest items require a non-empty path')
-        normalised_path = _normalise_obsidian_upload_path(path)
-        if not normalised_path.lower().endswith('.md'):
-            raise ValueError('note_manifest paths must end in .md')
-        if normalised_path in seen_paths:
-            continue
-        seen_paths.add(normalised_path)
-        manifest.append({'field': field.strip(), 'path': normalised_path})
-    return manifest
-
-
-def _extract_obsidian_notes(request: HttpRequest) -> list[dict[str, str]]:
-    manifest = _parse_note_manifest(request.POST.get('note_manifest'))
-    if manifest:
-        notes: list[dict[str, str]] = []
-        for item in manifest:
-            upload = request.FILES.get(item['field'])
-            if upload is None:
-                raise ValueError(f"note file missing for field '{item['field']}'")
-            notes.append({'source_path': item['path'], 'content': upload.read().decode('utf-8', 'ignore')})
-        return notes
-
-    source_path = (request.POST.get('source_path') or '').strip()
-    content = request.POST.get('content')
-    if not source_path or content is None:
-        raise ValueError('source_path and content required')
-    return [{'source_path': _normalise_obsidian_upload_path(source_path), 'content': content}]
 
 
 def _target_deck_path(root_deck_path: str, card_payload: dict[str, Any]) -> str:
@@ -991,27 +935,24 @@ def obsidian_preview_create(request: HttpRequest) -> JsonResponse:
         return _json_error(str(exc), status=401)
 
     source_path = (request.POST.get('source_path') or '').strip()
+    content = request.POST.get('content')
     root_deck_path = (request.POST.get('root_deck_path') or '').strip()
     source_hash = (request.POST.get('source_hash') or '').strip()
 
-    if not source_path or not root_deck_path or not source_hash:
-        return _json_error('source_path, root_deck_path, and source_hash required')
+    if not source_path or content is None or not root_deck_path or not source_hash:
+        return _json_error('source_path, content, root_deck_path, and source_hash required')
 
     root_deck = get_deck_by_full_path(user, root_deck_path)
     if root_deck is None:
         return _json_error('root deck not found', status=404)
 
     try:
-        primary_source_path = _normalise_obsidian_upload_path(source_path)
-        notes = _extract_obsidian_notes(request)
-        if all(note['source_path'] != primary_source_path for note in notes):
-            return _json_error('source_path must be included in note_manifest')
         attachments = _extract_obsidian_attachments(request)
-        session = prepare_markdown_notes_session(
+        session = prepare_markdown_note_session(
             user=user,
             root_deck=root_deck,
-            notes=notes,
-            primary_source_path=primary_source_path,
+            source_path=source_path,
+            content=content,
             attachments=attachments,
             source_hash=source_hash,
         )

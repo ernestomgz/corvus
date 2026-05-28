@@ -14,13 +14,6 @@ import { buildMultipartBody } from "./multipart";
 
 type HeaderValue = string | string[] | undefined;
 
-function encodeUtf8(value: string): ArrayBuffer {
-  const bytes = new TextEncoder().encode(value);
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy.buffer;
-}
-
 export class CorvusClient {
   private readonly baseUrl: string;
 
@@ -44,11 +37,6 @@ export class CorvusClient {
   }
 
   async createPreview(source: NoteSyncSource): Promise<PreviewSession> {
-    const noteManifest = source.files.map((file, index) => ({
-      field: `note_${index}`,
-      path: file.path,
-      source_hash: file.sourceHash,
-    }));
     const manifest = source.attachments.map((attachment) => ({
       field: attachment.field,
       path: attachment.path,
@@ -59,23 +47,14 @@ export class CorvusClient {
         { name: "content", value: source.content },
         { name: "root_deck_path", value: this.settings.rootDeckPath },
         { name: "source_hash", value: source.sourceHash },
-        { name: "note_manifest", value: JSON.stringify(noteManifest) },
         { name: "attachment_manifest", value: JSON.stringify(manifest) },
       ],
-      [
-        ...source.files.map((file, index) => ({
-          name: `note_${index}`,
-          filename: file.file.name,
-          contentType: "text/markdown; charset=utf-8",
-          data: encodeUtf8(file.content),
-        })),
-        ...source.attachments.map((attachment) => ({
-          name: attachment.field,
-          filename: attachment.fileName,
-          contentType: attachment.contentType,
-          data: attachment.data,
-        })),
-      ],
+      source.attachments.map((attachment) => ({
+        name: attachment.field,
+        filename: attachment.fileName,
+        contentType: attachment.contentType,
+        data: attachment.data,
+      })),
     );
 
     return await this.requestJson("/api/v1/obsidian/preview", {

@@ -99,27 +99,38 @@ If Corvus creates new cards without source IDs, the plugin writes those IDs back
 
 The plugin and Corvus only check these kebab-case frontmatter keys. Other frontmatter keys can remain in your notes; they are ignored by Corvus.
 
-- `questions-source`: read by the Obsidian plugin. It must contain one or more Obsidian wiki links to markdown notes. The plugin resolves those links with Obsidian and includes the referenced note(s) in the same sync preview.
+- `questions-source`: read by the Obsidian plugin when creating or updating a custom study preset. It must contain one or more Obsidian wiki links to markdown notes.
 - `card-tags`: read by Corvus. These tags are applied to every card imported from that markdown file.
 
-Example with one question source note:
+`questions-source` is not used by `Corvus Sync: Sync Current Note`. Import the main note and the question note as separate sync actions. When creating a custom study preset, the plugin reads each note linked by the preset note and expands that note's `questions-source` into additional preset sources.
+
+Preset note:
+
+```md
+# Test preset
+[[Function]]
+```
+
+Linked note:
 
 ```md
 ---
 created: 2026-05-23T16:03
 last-modified: 2026-05-23T16:03
-questions-source: "[[Questions Even and Odd functions]]"
+questions-source:"[[Questions Function]]"
 card-tags:
   - calculus
   - exam
 ---
 
-Even and odd functions
+Function
 #card
-Definitions and examples
+Definition
 ```
 
-Example with multiple question source notes:
+The preset will include imported cards whose `source_path` is `Function.md` and `Questions Function.md`.
+
+Example with multiple question source notes in a linked note:
 
 ```md
 ---
@@ -154,10 +165,13 @@ This plugin expects these Corvus endpoints to exist:
 - `GET /api/v1/obsidian/preview/<session_id>`
 - `POST /api/v1/obsidian/preview/<session_id>/apply`
 - `POST /api/v1/obsidian/preview/<session_id>/cancel`
+- `POST /api/v1/obsidian/study-set/preview`
+- `POST /api/v1/obsidian/study-set/apply`
 
 
 ## Notes
 
-- The plugin syncs the current note and any markdown notes referenced by its `questions-source` frontmatter.
+- The note sync command imports only the current note.
+- The custom study preset command expands `questions-source` from notes linked by the preset note.
 - Corvus remains responsible for markdown parsing, preview generation, media handling, and deck creation below the configured root.
 - If the note changes after preview, the plugin refuses to write IDs back and asks you to run sync again.

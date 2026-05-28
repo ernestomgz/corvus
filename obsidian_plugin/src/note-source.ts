@@ -3,7 +3,6 @@ import { App, TFile, normalizePath } from "obsidian";
 import { sha256Hex } from "./hash";
 import type {
   NoteAttachment,
-  NoteSyncFile,
   NoteSyncSource,
   StudySetLinkSource,
   StudySetSource,
@@ -24,23 +23,16 @@ const LOCAL_MEDIA_EXTENSIONS = new Set([
 
 export async function collectCurrentNoteSource(app: App): Promise<NoteSyncSource> {
   const file = getActiveMarkdownFile(app);
-  const noteFiles = collectSyncNoteFiles(app, file);
+  const originalContent = await app.vault.cachedRead(file);
   const attachmentFiles = new Map<string, TFile>();
-  const files: NoteSyncFile[] = [];
-
-  for (const noteFile of noteFiles) {
-    files.push(await collectNoteFile(app, noteFile, attachmentFiles));
-  }
-
+  const content = collectAttachmentsAndRewriteContent(app, file, originalContent, attachmentFiles);
   const attachments = await readAttachments(app, attachmentFiles);
-  const primary = files[0];
 
   return {
     file,
-    path: primary.path,
-    content: primary.content,
-    sourceHash: primary.sourceHash,
-    files,
+    path: file.path,
+    content,
+    sourceHash: await sha256Hex(originalContent),
     attachments,
   };
 }
@@ -49,7 +41,7 @@ export async function collectCurrentStudySetSource(app: App): Promise<StudySetSo
   const file = getActiveMarkdownFile(app);
   const content = await app.vault.cachedRead(file);
   const sourceHash = await sha256Hex(content);
-  const links = collectLinkedMarkdownNotes(app, file);
+  const links = await collectLinkedMarkdownNotes(app, file);
   if (links.length === 0) {
     throw new Error("The current note does not contain any markdown note links for a Corvus study preset.");
   }
@@ -71,7 +63,7 @@ function getActiveMarkdownFile(app: App): TFile {
   return file;
 }
 
-function collectLinkedMarkdownNotes(app: App, noteFile: TFile): StudySetLinkSource[] {
+async function collectLinkedMarkdownNotes(app: App, noteFile: TFile): Promise<StudySetLinkSource[]> {
   const metadata = app.metadataCache.getFileCache(noteFile);
   const links = metadata?.links ?? [];
   const linkedNotes = new Map<string, StudySetLinkSource>();
@@ -90,40 +82,54 @@ function collectLinkedMarkdownNotes(app: App, noteFile: TFile): StudySetLinkSour
     if (!(linkedFile instanceof TFile) || linkedFile.extension !== "md") {
       continue;
     }
-    if (!linkedNotes.has(linkedFile.path)) {
-      linkedNotes.set(linkedFile.path, {
-        linkText,
-        obsidianPath: linkedFile.path,
-      });
-    }
+    addStudySetLink(linkedNotes, linkedFile, linkText);
+    await addQuestionsSourceLinks(app, linkedFile, linkedNotes);
   }
 
   return Array.from(linkedNotes.values());
 }
 
-function collectSyncNoteFiles(app: App, noteFile: TFile): TFile[] {
-  const files = new Map<string, TFile>();
-  files.set(noteFile.path, noteFile);
-
-  for (const linkText of extractQuestionsSourceLinks(app, noteFile)) {
-    const linkedFile = app.metadataCache.getFirstLinkpathDest(linkText, noteFile.path);
+async function addQuestionsSourceLinks(
+  app: App,
+  sourceNote: TFile,
+  linkedNotes: Map<string, StudySetLinkSource>,
+): Promise<void> {
+  const content = await app.vault.cachedRead(sourceNote);
+  for (const linkText of extractQuestionsSourceLinks(app, sourceNote, content)) {
+    const linkedFile = app.metadataCache.getFirstLinkpathDest(linkText, sourceNote.path);
     if (!(linkedFile instanceof TFile) || linkedFile.extension !== "md") {
       throw new Error(`Question source note not found: ${linkText}`);
     }
-    files.set(linkedFile.path, linkedFile);
+    addStudySetLink(linkedNotes, linkedFile, linkText);
   }
-
-  return Array.from(files.values());
 }
 
-function extractQuestionsSourceLinks(app: App, noteFile: TFile): string[] {
+function addStudySetLink(
+  linkedNotes: Map<string, StudySetLinkSource>,
+  linkedFile: TFile,
+  linkText: string,
+): void {
+  if (!linkedNotes.has(linkedFile.path)) {
+    linkedNotes.set(linkedFile.path, {
+      linkText,
+      obsidianPath: linkedFile.path,
+    });
+  }
+}
+
+function extractQuestionsSourceLinks(app: App, noteFile: TFile, content: string): string[] {
   const metadata = app.metadataCache.getFileCache(noteFile);
   const rawValue = metadata?.frontmatter?.["questions-source"];
-  if (rawValue === undefined || rawValue === null) {
+  const values = rawValue === undefined || rawValue === null
+    ? parseQuestionsSourceFromFrontmatter(content)
+    : Array.isArray(rawValue)
+      ? rawValue
+      : [rawValue];
+
+  if (values.length === 0) {
     return [];
   }
 
-  const values = Array.isArray(rawValue) ? rawValue : [rawValue];
   const links: string[] = [];
   for (const value of values) {
     const text = String(value);
@@ -146,19 +152,39 @@ function extractQuestionsSourceLinks(app: App, noteFile: TFile): string[] {
   return links;
 }
 
-async function collectNoteFile(
-  app: App,
-  noteFile: TFile,
-  attachmentFiles: Map<string, TFile>,
-): Promise<NoteSyncFile> {
-  const originalContent = await app.vault.cachedRead(noteFile);
-  const content = collectAttachmentsAndRewriteContent(app, noteFile, originalContent, attachmentFiles);
-  return {
-    file: noteFile,
-    path: noteFile.path,
-    content,
-    sourceHash: await sha256Hex(originalContent),
-  };
+function parseQuestionsSourceFromFrontmatter(content: string): string[] {
+  const lines = content.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") {
+    return [];
+  }
+
+  const values: string[] = [];
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() === "---" || line.trim() === "...") {
+      break;
+    }
+    const match = line.match(/^questions-source\s*:\s*(.*)$/);
+    if (!match) {
+      continue;
+    }
+
+    const inlineValue = (match[1] ?? "").trim();
+    if (inlineValue) {
+      values.push(inlineValue);
+      continue;
+    }
+
+    for (let listIndex = index + 1; listIndex < lines.length; listIndex += 1) {
+      const listLine = lines[listIndex];
+      if (!/^\s+-\s+/.test(listLine)) {
+        break;
+      }
+      values.push(listLine.replace(/^\s+-\s+/, "").trim());
+    }
+    break;
+  }
+  return values;
 }
 
 function collectAttachmentsAndRewriteContent(

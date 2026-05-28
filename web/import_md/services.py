@@ -750,39 +750,6 @@ def _build_uploaded_archive_from_note(
     return SimpleUploadedFile(filename, buffer.read(), content_type='application/zip')
 
 
-def _build_uploaded_archive_from_notes(
-    *,
-    notes: list[dict[str, str]],
-    attachments: dict[str, bytes] | None = None,
-):
-    if not notes:
-        raise MarkdownImportError('at least one markdown note is required')
-
-    normalised_notes: list[tuple[str, str]] = []
-    seen_paths: set[str] = set()
-    for note in notes:
-        normalised_source_path = _normalise_archive_member_path(note.get('source_path') or note.get('path') or '')
-        if not normalised_source_path.lower().endswith('.md'):
-            raise MarkdownImportError('source_path must end with .md')
-        if normalised_source_path in seen_paths:
-            raise MarkdownImportError(f"duplicate source_path '{normalised_source_path}'")
-        seen_paths.add(normalised_source_path)
-        normalised_notes.append((normalised_source_path, note.get('content') or ''))
-
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, 'w') as zf:
-        for source_path, content in normalised_notes:
-            zf.writestr(source_path, content)
-        for attachment_path, data in sorted((attachments or {}).items()):
-            normalised_attachment_path = _normalise_archive_member_path(attachment_path)
-            if normalised_attachment_path in seen_paths:
-                raise MarkdownImportError('attachment path conflicts with source_path')
-            zf.writestr(normalised_attachment_path, data)
-    buffer.seek(0)
-    filename = f"{Path(normalised_notes[0][0]).stem or 'notes'}.zip"
-    return SimpleUploadedFile(filename, buffer.read(), content_type='application/zip')
-
-
 def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> ImportSession:
     resolver = _build_marker_resolver(user)
     parsed_cards, parse_summary = _collect_markdown_cards(
@@ -978,28 +945,10 @@ def prepare_markdown_note_session(
     attachments: dict[str, bytes] | None = None,
     source_hash: str = '',
 ) -> ImportSession:
-    return prepare_markdown_notes_session(
-        user=user,
-        root_deck=root_deck,
-        notes=[{'source_path': source_path, 'content': content}],
-        primary_source_path=source_path,
-        attachments=attachments,
-        source_hash=source_hash,
-    )
-
-
-def prepare_markdown_notes_session(
-    *,
-    user,
-    root_deck: Deck,
-    notes: list[dict[str, str]],
-    primary_source_path: str,
-    attachments: dict[str, bytes] | None = None,
-    source_hash: str = '',
-) -> ImportSession:
-    normalised_source_path = _normalise_archive_member_path(primary_source_path)
-    uploaded_file = _build_uploaded_archive_from_notes(
-        notes=notes,
+    normalised_source_path = _normalise_archive_member_path(source_path)
+    uploaded_file = _build_uploaded_archive_from_note(
+        source_path=normalised_source_path,
+        content=content,
         attachments=attachments,
     )
     session = prepare_markdown_session(user=user, deck=root_deck, uploaded_file=uploaded_file)

@@ -1055,6 +1055,87 @@ def test_hierarchy_identical_to_card_front_removes_last_entry(user_factory, deck
         assert not context_line.endswith('Card Topic > Card Topic')
 
 
+def test_frontmatter_card_heading_context_false_removes_heading_prefix(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        '---\n'
+        'card-heading-context: false\n'
+        '---\n'
+        '# Title\n'
+        '## Subtitle\n'
+        'Question\n'
+        '#card\n'
+        'Solution'
+    )
+    archive = _build_zip({'note.md': markdown})
+    process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    card = Card.objects.get(user=user)
+
+    assert card.front_md == 'Question'
+    assert card.back_md == 'Solution'
+
+
+def test_frontmatter_card_heading_context_false_keeps_heading_as_question(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        '---\n'
+        'card-heading-context: false\n'
+        '---\n'
+        '# Title\n'
+        '## What is a derivative?\n'
+        '#card\n'
+        'Instantaneous rate of change.'
+    )
+    archive = _build_zip({'note.md': markdown})
+    process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    card = Card.objects.get(user=user)
+
+    assert card.front_md == 'What is a derivative?'
+    assert card.back_md == 'Instantaneous rate of change.'
+
+
+def test_frontmatter_card_heading_context_false_applies_to_reverse_back(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        '---\n'
+        'card-heading-context: false\n'
+        '---\n'
+        '# Title\n'
+        '## Subtitle\n'
+        'Question\n'
+        '#card-reverse\n'
+        'Solution'
+    )
+    archive = _build_zip({'note.md': markdown})
+    process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    cards = list(Card.objects.filter(user=user).order_by('created_at'))
+
+    assert cards[0].front_md == 'Question'
+    assert cards[0].back_md == 'Solution'
+    assert cards[1].front_md == 'Solution'
+    assert cards[1].back_md == 'Question'
+
+
+def test_frontmatter_card_heading_context_invalid_value_errors(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        '---\n'
+        'card-heading-context: sometimes\n'
+        '---\n'
+        'Question\n'
+        '#card\n'
+        'Answer'
+    )
+    archive = _build_zip({'note.md': markdown})
+
+    with pytest.raises(MarkdownImportError, match="'card-heading-context' must be a boolean"):
+        process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+
+
 # ============================================================================
 # EDGE CASES: Reverse Cards
 # ============================================================================

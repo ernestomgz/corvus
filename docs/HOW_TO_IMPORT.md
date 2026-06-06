@@ -68,6 +68,7 @@ Corvus reads a small set of kebab-case YAML frontmatter keys. Unknown keys are a
 Checked keys:
 
 - `card-tags`: imported by Corvus. Tags listed here are applied to every card parsed from that Markdown file.
+- `card-heading-context`: imported by Corvus. Set to `false` to stop Corvus from prepending the Markdown heading hierarchy to each card front.
 
 `card-tags` can be a YAML list:
 
@@ -110,6 +111,43 @@ e^x
 ```
 
 On update, imported tags are replaced by the current imported tags. Removing a tag from frontmatter removes it from the updated card.
+
+By default, Corvus prepends the current heading hierarchy to each card front:
+
+```md
+# Calculus
+## Derivatives
+What is a derivative?
+#card
+Instantaneous rate of change.
+```
+
+Front:
+
+```txt
+Calculus > Derivatives
+What is a derivative?
+```
+
+Disable that file-wide with `card-heading-context: false`:
+
+```md
+---
+card-heading-context: false
+---
+
+# Calculus
+## Derivatives
+What is a derivative?
+#card
+Instantaneous rate of change.
+```
+
+Front:
+
+```txt
+What is a derivative?
+```
 
 Inline IDs are supported:
 

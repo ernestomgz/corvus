@@ -229,6 +229,22 @@ def _normalise_frontmatter_tags(raw: object) -> list[str]:
     return _normalise_tags(str(raw))
 
 
+def _normalise_frontmatter_bool(raw: object, *, key: str, default: bool) -> bool:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int) and raw in {0, 1}:
+        return bool(raw)
+    if isinstance(raw, str):
+        value = raw.strip().lower()
+        if value in {'true', 'yes', 'on', '1'}:
+            return True
+        if value in {'false', 'no', 'off', '0'}:
+            return False
+    raise MarkdownImportError(f"YAML frontmatter '{key}' must be a boolean")
+
+
 def _split_frontmatter(content: str) -> tuple[str, dict, int]:
     lines = content.splitlines()
     if not lines or lines[0].strip() != '---':
@@ -451,6 +467,11 @@ def _parse_markdown_cards(
 ) -> List[ParsedCard]:
     content, frontmatter, line_offset = _split_frontmatter(content)
     file_tags = _normalise_frontmatter_tags(frontmatter.get('card-tags'))
+    include_heading_context = _normalise_frontmatter_bool(
+        frontmatter.get('card-heading-context'),
+        key='card-heading-context',
+        default=True,
+    )
     lines = content.splitlines()
     parsed_cards: list[ParsedCard] = []
     deck_parts = _normalise_deck_path(list(deck_path or []))
@@ -602,13 +623,16 @@ def _parse_markdown_cards(
         else:
             front_content = _clean_front_text(front_content)
 
-        if heading_level is not None:
+        if not include_heading_context:
+            context_md = ''
+        elif heading_level is not None:
             context_titles = [title for level, title in heading_stack if level < heading_level]
+            context_md = ' > '.join([title for title in context_titles if title])
         else:
             context_titles = [title for _level, title in heading_stack]
             if context_titles and context_titles[-1].strip().lower() == front_content.strip().lower():
                 context_titles = context_titles[:-1]
-        context_md = ' > '.join([title for title in context_titles if title])
+            context_md = ' > '.join([title for title in context_titles if title])
 
         front_md, media_front, missing_front = _rewrite_media_links(
             front_content, user_id=user_id, zip_file=zip_file, summary=summary, source_dir=source_dir

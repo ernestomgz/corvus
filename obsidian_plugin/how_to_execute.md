@@ -101,6 +101,7 @@ The plugin and Corvus only check these kebab-case frontmatter keys. Other frontm
 
 - `questions-source`: read by the Obsidian plugin when creating or updating a custom study preset. It must contain one or more Obsidian wiki links to markdown notes.
 - `card-tags`: read by Corvus. These tags are applied to every card imported from that markdown file.
+- `card-heading-context`: read by Corvus. Set to `false` to stop Corvus from prepending the Markdown heading hierarchy to each imported card front.
 
 `questions-source` is not used by `Corvus Sync: Sync Current Note`. Import the main note and the question note as separate sync actions. When creating a custom study preset, the plugin reads each note linked by the preset note and expands that note's `questions-source` into additional preset sources.
 
@@ -118,6 +119,7 @@ Linked note:
 created: 2026-05-23T16:03
 last-modified: 2026-05-23T16:03
 questions-source:"[[Questions Function]]"
+card-heading-context: false
 card-tags:
   - calculus
   - exam

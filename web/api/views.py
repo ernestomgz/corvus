@@ -320,6 +320,9 @@ def _serialise_obsidian_session(session: ImportSession) -> dict[str, Any]:
     cards_payload = []
     for card in payload.get('cards', []):
         existing = card.get('existing') or {}
+        metadata_changes = card.get('metadata_changes') or {}
+        if not isinstance(metadata_changes, dict):
+            metadata_changes = {}
         cards_payload.append(
             {
                 'index': card.get('index'),
@@ -331,6 +334,8 @@ def _serialise_obsidian_session(session: ImportSession) -> dict[str, Any]:
                 'source_path': card.get('source_path'),
                 'existing': bool(existing),
                 'existing_card_id': existing.get('card_id') if isinstance(existing, dict) else None,
+                'existing_deck_path': existing.get('deck_full_path') if isinstance(existing, dict) else '',
+                'metadata_changes': metadata_changes,
                 'has_changes': bool(card.get('has_changes')),
                 'unchanged': bool(card.get('unchanged')),
                 'warnings': list(card.get('warnings') or []),

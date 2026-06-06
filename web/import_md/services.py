@@ -190,6 +190,14 @@ def _strip_root_deck(parts: list[str], root: Deck | None) -> list[str]:
     return [part for part in parts[index:]]
 
 
+def _format_target_deck_path(root: Deck | None, parts: list[str]) -> str:
+    cleaned = _normalise_deck_path(list(parts or []))
+    if root is None:
+        return '/'.join(cleaned)
+    root_parts = [segment.strip() for segment in root.full_path().split('/') if segment.strip()]
+    return '/'.join([*root_parts, *cleaned])
+
+
 def _normalise_tags(raw: str | None) -> list[str]:
     if not raw:
         return []
@@ -880,20 +888,45 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
             existing_card = external.card
         if existing_card:
             display_tags = incoming_tags
+            existing_deck_path = _strip_root_deck(
+                _normalise_deck_path(existing_card.deck.full_path().split('/')),
+                deck,
+            )
+            incoming_deck_path = _normalise_deck_path(parsed.deck_path)
+            metadata_changes = {}
+            if existing_deck_path != incoming_deck_path:
+                metadata_changes['deck'] = {
+                    'from': existing_card.deck.full_path(),
+                    'to': _format_target_deck_path(deck, incoming_deck_path),
+                }
+            if (existing_card.source_path or '') != (parsed.source_path or ''):
+                metadata_changes['source_path'] = {
+                    'from': existing_card.source_path or '',
+                    'to': parsed.source_path or '',
+                }
+            if (existing_card.source_anchor or '') != (parsed.source_anchor or ''):
+                metadata_changes['source_anchor'] = {
+                    'from': existing_card.source_anchor or '',
+                    'to': parsed.source_anchor or '',
+                }
             existing_payload = {
                 'card_id': str(existing_card.id),
                 'deck_id': existing_card.deck_id,
-                'deck_path': _strip_root_deck(existing_card.deck.full_path().split('/'), deck),
+                'deck_path': existing_deck_path,
+                'deck_full_path': existing_card.deck.full_path(),
                 'front_md': existing_card.front_md,
                 'back_md': existing_card.back_md,
                 'tags': existing_card.tags,
                 'media': existing_card.media,
+                'source_path': existing_card.source_path,
+                'source_anchor': existing_card.source_anchor,
             }
             has_changes = (
                 existing_card.front_md != display_front
                 or existing_card.back_md != display_back
                 or existing_card.tags != display_tags
                 or existing_card.media != parsed.media
+                or bool(metadata_changes)
             )
             if has_changes:
                 update_count += 1
@@ -902,6 +935,7 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
                 unchanged_count += 1
         else:
             existing_payload = None
+            metadata_changes = {}
             has_changes = True
             create_count += 1
 
@@ -930,6 +964,7 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
                 'existing': existing_payload,
                 'has_changes': has_changes,
                 'unchanged': bool(existing_payload and not has_changes),
+                'metadata_changes': metadata_changes,
                 'context': parsed.context_md,
                 'errors': card_errors,
                 'warnings': card_warnings,

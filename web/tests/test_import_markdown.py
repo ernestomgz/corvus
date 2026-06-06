@@ -152,6 +152,42 @@ def test_md_import_id_update_existing(user_factory, deck_factory):
     assert card.back_md == 'Updated answer'
 
 
+def test_md_import_id_update_detects_source_path_only_change(user_factory, deck_factory):
+    user = user_factory()
+    root = deck_factory(user=user, name='STEM', parent=None)
+    markdown = 'Question\n#card id:abc1\nAnswer'
+
+    process_markdown_archive(
+        user=user,
+        deck=root,
+        uploaded_file=_build_zip({'Math/topic.md': markdown}),
+    )
+    math = Deck.objects.get(user=user, parent=root, name='Math')
+    card = Card.objects.get(user=user)
+    assert card.deck == math
+    assert card.source_path == 'Math/topic.md'
+
+    session = prepare_markdown_session(
+        user=user,
+        deck=root,
+        uploaded_file=_build_zip({'Math/renamed-topic.md': markdown}),
+    )
+    card_payload = session.payload['cards'][0]
+    assert card_payload['has_changes'] is True
+    assert card_payload['unchanged'] is False
+    assert card_payload['metadata_changes']['source_path'] == {
+        'from': 'Math/topic.md',
+        'to': 'Math/renamed-topic.md',
+    }
+
+    record = apply_markdown_session(session)
+    card.refresh_from_db()
+    assert record.summary['updated'] == 1
+    assert record.summary['skipped'] == 0
+    assert card.deck == math
+    assert card.source_path == 'Math/renamed-topic.md'
+
+
 def test_md_import_id_conflict_warning(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)

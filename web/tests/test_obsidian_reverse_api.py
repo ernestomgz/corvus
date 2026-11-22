@@ -67,3 +67,18 @@ def test_obsidian_reverse_card_ids_roundtrip(api_client, user_factory, deck_fact
     assert {card['target_deck_path'] for card in second_cards} == {'STEM/Languages/capital.md'}
     assert second_preview.json()['planned_decks'] == []
     assert all(not card['will_write_back_id'] for card in second_cards)
+
+    audit = api_client.post(
+        '/api/v1/obsidian/audit-note',
+        data=_preview_payload(
+            source_path='Languages/capital.md',
+            content=f'## Capital of France\n#card-reverse id:{forward_id}|{reverse_id}\nParis',
+            root_deck_path='STEM',
+            source_hash='hash-reverse-2',
+        ),
+    )
+    assert audit.status_code == 200
+    assert audit.json() == {
+        'identified': 2, 'found': 2, 'updates': 0, 'moves': 0, 'unchanged': 2, 'without_ids': 0, 'errors': [],
+        'identities': [{'kind': 'marker', 'value': value} for value in (forward_id, reverse_id)],
+    }

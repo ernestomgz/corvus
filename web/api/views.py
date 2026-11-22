@@ -36,6 +36,7 @@ from import_anki.services import AnkiImportError, process_apkg_archive
 from import_md.services import (
     MarkdownImportError,
     apply_markdown_session,
+    audit_markdown_note,
     cancel_markdown_session,
     prepare_markdown_note_session,
     process_markdown_archive,
@@ -924,7 +925,7 @@ def _get_obsidian_session(user: User, session_id: str) -> ImportSession:
 
 @csrf_exempt
 @require_http_methods(['POST'])
-def obsidian_preview_create(request: HttpRequest) -> JsonResponse:
+def obsidian_preview_create(request: HttpRequest, *, audit: bool = False) -> JsonResponse:
     try:
         user = _require_user(request)
     except PermissionError as exc:
@@ -944,6 +945,10 @@ def obsidian_preview_create(request: HttpRequest) -> JsonResponse:
 
     try:
         attachments = _extract_obsidian_attachments(request)
+        if audit:
+            return JsonResponse(audit_markdown_note(
+                user=user, root_deck=root_deck, source_path=source_path, content=content, attachments=attachments,
+            ))
         session = prepare_markdown_note_session(
             user=user,
             root_deck=root_deck,

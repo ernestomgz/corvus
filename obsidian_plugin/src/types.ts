@@ -30,6 +30,17 @@ export interface NoteSyncSource {
   attachments: NoteAttachment[];
 }
 
+export interface NoteSyncAudit {
+  identified: number;
+  identities: { kind: "marker" | "anchor"; value: string }[];
+  found: number;
+  updates: number;
+  moves: number;
+  unchanged: number;
+  without_ids: number;
+  errors: string[];
+}
+
 export interface StudySetLinkSource {
   linkText: string;
   obsidianPath: string;

@@ -4,6 +4,7 @@ import type {
   ApplyDecision,
   ApplyResponse,
   CorvusPluginSettings,
+  NoteSyncAudit,
   NoteSyncSource,
   PreviewSession,
   StudySetApplyResponse,
@@ -37,6 +38,14 @@ export class CorvusClient {
   }
 
   async createPreview(source: NoteSyncSource): Promise<PreviewSession> {
+    return await this.sendNote("/api/v1/obsidian/preview", source);
+  }
+
+  async auditNote(source: NoteSyncSource): Promise<NoteSyncAudit> {
+    return await this.sendNote("/api/v1/obsidian/audit-note", source);
+  }
+
+  private async sendNote<T>(path: string, source: NoteSyncSource): Promise<T> {
     const manifest = source.attachments.map((attachment) => ({
       field: attachment.field,
       path: attachment.path,
@@ -57,7 +66,7 @@ export class CorvusClient {
       })),
     );
 
-    return await this.requestJson("/api/v1/obsidian/preview", {
+    return await this.requestJson(path, {
       method: "POST",
       body,
       headers: {

@@ -11,6 +11,7 @@ urlpatterns = [
     path('auth/login', views.auth_login, name='auth-login'),
     path('auth/logout', views.auth_logout, name='auth-logout'),
     path('obsidian/preview', views.obsidian_preview_create, name='obsidian-preview-create'),
+    path('obsidian/audit-note', views.obsidian_preview_create, {'audit': True}, name='obsidian-audit-note'),
     path('obsidian/preview/<uuid:session_id>', views.obsidian_preview_detail, name='obsidian-preview-detail'),
     path('obsidian/preview/<uuid:session_id>/apply', views.obsidian_preview_apply, name='obsidian-preview-apply'),
     path('obsidian/preview/<uuid:session_id>/cancel', views.obsidian_preview_cancel, name='obsidian-preview-cancel'),

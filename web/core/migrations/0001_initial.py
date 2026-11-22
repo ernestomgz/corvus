@@ -50,9 +50,7 @@ class Migration(migrations.Migration):
                     models.Index(fields=['user', 'id'], name='core_deck_user_id_id_idx'),
                 ],
                 'constraints': [
-                    models.UniqueConstraint(
-                        fields=('user', 'parent', 'name'), name='unique_deck_per_parent', nulls_distinct=False,
-                    ),
+                    models.UniqueConstraint(fields=('user', 'parent', 'name'), name='unique_deck_per_parent'),
                 ],
             },
         ),

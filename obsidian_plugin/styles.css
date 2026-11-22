@@ -106,3 +106,21 @@
   gap: 8px;
   margin-top: 16px;
 }
+.corvus-vault-sync-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.corvus-vault-sync-note {
+  display: grid;
+  gap: 0.25rem;
+  height: auto;
+  padding: 0.75rem;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.corvus-vault-sync-note span {
+  color: var(--text-muted);
+}

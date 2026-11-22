@@ -23,6 +23,47 @@ def test_obsidian_preview_requires_auth(api_client):
     assert response.status_code == 401
 
 
+def test_obsidian_vault_audit_reports_changes_without_writing(
+    api_client, user_factory, deck_factory, card_factory, settings,
+):
+    root = deck_factory(name='STEM')
+    user = root.user
+    note_deck = deck_factory(user=user, parent=root, name='Circuit.md')
+    changed = card_factory(user=user, deck=root, import_id='ab1', front_md='Old', back_md='Answer')
+    card_factory(
+        user=user, deck=note_deck, import_id='ab2', front_md='Same', back_md='Answer', source_path='Circuit.md',
+    )
+    card_factory(user=user_factory(), import_id='ab3')
+    payload = _preview_payload(
+        source_path='Circuit.md', root_deck_path='STEM', source_hash='audit-hash',
+        content=(
+            'Changed\n#card id:ab1\n![[diagram.png]]\n\n'
+            'Same\n#card id:ab2\nAnswer\n\n'
+            'Missing\n#card id:ab3\nAnswer\n\n'
+            'New\n#card\nAnswer'
+        ),
+    )
+    payload['attachment_manifest'] = json.dumps([{'field': 'image', 'path': 'diagram.png'}])
+    payload['image'] = SimpleUploadedFile('diagram.png', b'image bytes')
+
+    assert api_client.post('/api/v1/obsidian/audit-note').status_code == 401
+    api_client.force_login(user)
+    response = api_client.post('/api/v1/obsidian/audit-note', data=payload)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        'identified': 3, 'found': 2, 'updates': 1, 'moves': 1, 'unchanged': 1, 'without_ids': 1, 'errors': [],
+        'identities': [{'kind': 'marker', 'value': value} for value in ('ab1', 'ab2', 'ab3')],
+    }
+    changed.refresh_from_db()
+    assert changed.deck_id == root.id
+    assert changed.front_md == 'Old'
+    assert Card.objects.filter(user=user).count() == 2
+    assert Deck.objects.filter(user=user).count() == 2
+    assert not ImportSession.objects.filter(user=user).exists()
+    assert not list(settings.MEDIA_ROOT.iterdir())
+
+
 def test_obsidian_preview_create_and_fetch_with_media(api_client, user_factory, deck_factory):
     user = user_factory()
     root = deck_factory(user=user, name='STEM', parent=None)

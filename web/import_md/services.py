@@ -265,7 +265,7 @@ def _ensure_media_directory(user_id: int) -> Path:
     return user_media_dir
 
 
-def _copy_media(user_id: int, zip_file: zipfile.ZipFile, asset_path: str) -> Tuple[str, dict] | None:
+def _resolve_media(user_id: int, zip_file: zipfile.ZipFile, asset_path: str, *, write_media: bool) -> Tuple[str, dict] | None:
     normalised_asset = asset_path.lstrip('./')
     try:
         data = zip_file.read(normalised_asset)
@@ -274,16 +274,16 @@ def _copy_media(user_id: int, zip_file: zipfile.ZipFile, asset_path: str) -> Tup
     digest = hashlib.sha1(data).hexdigest()
     suffix = Path(normalised_asset).suffix or ''
     filename = f"{digest}{suffix}"
-    destination_dir = _ensure_media_directory(user_id)
-    destination_path = destination_dir / filename
-    if not destination_path.exists():
-        destination_path.write_bytes(data)
+    if write_media:
+        destination_path = _ensure_media_directory(user_id) / filename
+        if not destination_path.exists():
+            destination_path.write_bytes(data)
     url = f"{settings.MEDIA_URL}{user_id}/{filename}".replace('//', '/')
     return url, {'name': Path(normalised_asset).name, 'url': url, 'hash': digest}
 
 
 def _rewrite_media_links(
-    text: str, *, user_id: int, zip_file: zipfile.ZipFile, summary: dict, source_dir: str | None = None
+    text: str, *, user_id: int, zip_file: zipfile.ZipFile, summary: dict, source_dir: str | None, write_media: bool,
 ) -> Tuple[str, list[dict], list[str]]:
     media_items: list[dict] = []
     missing_assets: list[str] = []
@@ -309,7 +309,7 @@ def _rewrite_media_links(
         if re.match(r'^[a-z]+://', token) or token.startswith('data:'):
             return None
         for candidate in _candidate_paths(asset):
-            result = _copy_media(user_id, zip_file, candidate)
+            result = _resolve_media(user_id, zip_file, candidate, write_media=write_media)
             if result is None:
                 continue
             url, media_meta = result
@@ -445,6 +445,7 @@ def _parse_markdown_cards(
     summary: dict,
     resolver: MarkerResolver,
     deck_path: list[str] | None = None,
+    write_media: bool = True,
 ) -> List[ParsedCard]:
     content, frontmatter, line_offset = _split_frontmatter(content)
     file_tags = _normalise_frontmatter_tags(frontmatter.get('card-tags'))
@@ -616,10 +617,10 @@ def _parse_markdown_cards(
             context_md = ' > '.join([title for title in context_titles if title])
 
         front_md, media_front, missing_front = _rewrite_media_links(
-            front_content, user_id=user_id, zip_file=zip_file, summary=summary, source_dir=source_dir
+            front_content, user_id=user_id, zip_file=zip_file, summary=summary, source_dir=source_dir, write_media=write_media,
         )
         back_md, media_back, missing_back = _rewrite_media_links(
-            back_md_raw, user_id=user_id, zip_file=zip_file, summary=summary, source_dir=source_dir
+            back_md_raw, user_id=user_id, zip_file=zip_file, summary=summary, source_dir=source_dir, write_media=write_media,
         )
 
         media: list[dict] = []
@@ -679,7 +680,7 @@ def _parse_markdown_cards(
     return parsed_cards
 
 
-def _collect_markdown_cards(*, user_id: int, uploaded_file, resolver: MarkerResolver) -> Tuple[List[ParsedCard], dict]:
+def _collect_markdown_cards(*, user_id: int, uploaded_file, resolver: MarkerResolver, write_media: bool) -> Tuple[List[ParsedCard], dict]:
     summary = {'media_copied': 0}
     data = uploaded_file.read()
     try:
@@ -717,6 +718,7 @@ def _collect_markdown_cards(*, user_id: int, uploaded_file, resolver: MarkerReso
                     summary=summary,
                     resolver=resolver,
                     deck_path=_note_deck_path(source_path),
+                    write_media=write_media,
                 )
             )
     for buffer in buffers:
@@ -757,10 +759,10 @@ def _build_uploaded_archive_from_note(
     return SimpleUploadedFile(filename, buffer.read(), content_type='application/zip')
 
 
-def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> ImportSession:
+def _build_markdown_payload(*, user, deck: Deck | None, uploaded_file, audit: bool = False) -> dict:
     resolver = _build_marker_resolver(user)
     parsed_cards, parse_summary = _collect_markdown_cards(
-        user_id=user.id, uploaded_file=uploaded_file, resolver=resolver
+        user_id=user.id, uploaded_file=uploaded_file, resolver=resolver, write_media=not audit,
     )
 
     # Only explicit marker ids participate in existing-card lookup. Auto-generated ids
@@ -779,7 +781,7 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
             for card in Card.objects.filter(user=user, import_id__in=import_ids)
         }
 
-    used_ids = set(Card.objects.filter(import_id__isnull=False).values_list('import_id', flat=True))
+    used_ids = set() if audit else set(Card.objects.filter(import_id__isnull=False).values_list('import_id', flat=True))
     # Reserve ids from this batch before filling gaps so generated ids cannot collide
     # with explicit ids later in the same file.
     for card in parsed_cards:
@@ -787,7 +789,7 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
             used_ids.add(card.import_id)
 
     for card in parsed_cards:
-        if not card.import_id:
+        if not card.import_id and not audit:
             next_id = 1
             while True:
                 candidate = hex(next_id)[2:].lower()
@@ -796,7 +798,7 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
                     used_ids.add(candidate)
                     break
                 next_id += 1
-        else:
+        elif card.import_id:
             try:
                 int(card.import_id, 16)
             except ValueError:
@@ -907,7 +909,7 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
             create_count += 1
 
         diff_payload = None
-        if existing_payload and has_changes:
+        if existing_payload and has_changes and not audit:
             diff_payload = {
                 'front': _render_diff_rows(existing_payload['front_md'], display_front),
                 'back': _render_diff_rows(existing_payload['back_md'], display_back),
@@ -940,27 +942,59 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
             }
         )
 
-    session = ImportSession.objects.create(
+    return {
+        'root_deck_id': deck.id if deck else None,
+        'cards': session_cards,
+        'summary': {
+            'creates': create_count,
+            'updates': update_count,
+            'unchanged': unchanged_count,
+            'conflicts': diff_count,
+            'media_copied': parse_summary.get('media_copied', 0),
+            'has_errors': has_invalid_cards,
+        },
+    }
+
+
+def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> ImportSession:
+    payload = _build_markdown_payload(user=user, deck=deck, uploaded_file=uploaded_file)
+    total = len(payload['cards'])
+    return ImportSession.objects.create(
         user=user,
         kind='markdown',
         status='ready',
         source_name=getattr(uploaded_file, 'name', ''),
-        total=len(session_cards),
-        processed=len(session_cards),
-        payload={
-            'root_deck_id': deck.id if deck else None,
-            'cards': session_cards,
-            'summary': {
-                'creates': create_count,
-                'updates': update_count,
-                'unchanged': unchanged_count,
-                'conflicts': diff_count,
-                'media_copied': parse_summary.get('media_copied', 0),
-                'has_errors': has_invalid_cards,
-            },
-        },
+        total=total,
+        processed=total,
+        payload=payload,
     )
-    return session
+
+
+def audit_markdown_note(*, user, root_deck: Deck, source_path: str, content: str, attachments: dict[str, bytes]) -> dict:
+    try:
+        upload = _build_uploaded_archive_from_note(source_path=source_path, content=content, attachments=attachments)
+        cards = _build_markdown_payload(user=user, deck=root_deck, uploaded_file=upload, audit=True)['cards']
+        errors = list(dict.fromkeys(error for card in cards for error in card['errors']))
+    except MarkdownImportError as exc:
+        cards = []
+        errors = [str(exc)]
+    identified = [card for card in cards if card['had_explicit_import_id'] or card['source_anchor']]
+    matched = [card for card in identified if card['existing']]
+    updates = [card for card in matched if card['has_changes'] and not card['errors']]
+    return {
+        'identified': len(identified),
+        'identities': [
+            {'kind': 'marker', 'value': card['import_id']}
+            if card['had_explicit_import_id'] else {'kind': 'anchor', 'value': card['source_anchor']}
+            for card in identified
+        ],
+        'found': len(matched),
+        'updates': len(updates),
+        'moves': sum('deck' in card['metadata_changes'] for card in updates),
+        'unchanged': sum(card['unchanged'] and not card['errors'] for card in matched),
+        'without_ids': len(cards) - len(identified),
+        'errors': errors,
+    }
 
 
 def prepare_markdown_note_session(

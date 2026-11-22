@@ -4,6 +4,7 @@ import { CorvusClient } from "./corvus-client";
 import { collectCurrentNoteSource, collectCurrentStudySetSource, collectNoteSource } from "./note-source";
 import { SyncPreviewModal } from "./preview-modal";
 import { StudySetPreviewModal } from "./study-set-modal";
+import { createVaultSyncExclusionMatcher } from "./vault-sync-exclusions";
 import { VaultSyncModal, type VaultSyncRow } from "./vault-sync-modal";
 import { DEFAULT_SETTINGS, type CorvusPluginSettings, type NoteSyncSource } from "./types";
 import { writeBackImportIds } from "./writeback";
@@ -60,7 +61,8 @@ export default class CorvusSyncPlugin extends Plugin {
       const client = new CorvusClient(this.settings);
       await client.login();
 
-      const notes = this.app.vault.getMarkdownFiles();
+      const isExcluded = createVaultSyncExclusionMatcher(this.settings.vaultSyncExclusions);
+      const notes = this.app.vault.getMarkdownFiles().filter((file) => !isExcluded(file.path));
       const rows: VaultSyncRow[] = [];
       for (const [index, file] of notes.entries()) {
         progress.setMessage(`Checking Corvus sync · ${index + 1} of ${notes.length} notes`);
@@ -79,7 +81,9 @@ export default class CorvusSyncPlugin extends Plugin {
       }
       new VaultSyncModal(this.app, rows).open();
     } catch (error) {
-      new Notice(this.errorMessage(error, "Corvus vault check failed"));
+      const message = this.errorMessage(error, "Corvus vault check failed");
+      console.error(message);
+      new Notice(message);
     } finally {
       progress.hide();
       this.checkingVault = false;
@@ -260,6 +264,20 @@ class CorvusSyncSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
       );
+
+    new Setting(containerEl)
+      .setName("Vault sync exclusions")
+      .setDesc("One path from the vault root per line. Include .md for notes. Folders include subfolders. Applies to Check Vault Sync.")
+      .addTextArea((text) => {
+        text.inputEl.rows = 4;
+        text
+          .setPlaceholder("Templates/\nStudy/Card Template.md")
+          .setValue(this.plugin.settings.vaultSyncExclusions)
+          .onChange(async (value) => {
+            this.plugin.settings.vaultSyncExclusions = value;
+            await this.plugin.saveSettings();
+          });
+      });
 
     new Setting(containerEl)
       .setName("Test Connection")

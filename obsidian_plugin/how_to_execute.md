@@ -101,6 +101,10 @@ If Corvus creates new cards without source IDs, the plugin writes those IDs back
 
 Run **Corvus Sync: Check Vault Sync** from the command palette to see which notes need attention. Each row shows counts for matched IDs, updates, deck moves, and cards without IDs. Click a row to open the note, then run **Sync Current Note** if you want to apply changes.
 
+To skip templates, open **Settings → Corvus Sync → Vault sync exclusions**. Enter one case-sensitive path from the vault root per line. For example, `Templates/` skips that folder and its subfolders, and `Study/Card Template.md` skips just that note. **Sync Current Note** remains available for those notes.
+
+Use **Updates** for notes with pending changes, **Deck moves** for notes that would switch decks, and **ID issues** for duplicate or missing IDs and cards without IDs. Deck moves can also appear under Updates. **Up to date** shows notes with no pending changes or issues. Notes that could not be read appear at the top of **All**.
+
 If the same ID appears in more than one note, the check lists the other note paths on each affected row. Review those notes before syncing, especially if one was copied with its card IDs intact.
 
 The check sends candidate notes and their attachments to the configured Corvus server for comparison. It does not change notes, cards, decks, or stored media. The server must support `POST /api/v1/obsidian/audit-note`.

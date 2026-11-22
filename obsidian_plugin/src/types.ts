@@ -5,6 +5,7 @@ export interface CorvusPluginSettings {
   username: string;
   password: string;
   rootDeckPath: string;
+  vaultSyncExclusions: string;
 }
 
 export const DEFAULT_SETTINGS: CorvusPluginSettings = {
@@ -12,6 +13,7 @@ export const DEFAULT_SETTINGS: CorvusPluginSettings = {
   username: "",
   password: "",
   rootDeckPath: "",
+  vaultSyncExclusions: "",
 };
 
 export interface NoteAttachment {

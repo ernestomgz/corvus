@@ -147,15 +147,6 @@ def _extract_obsidian_attachments(request: HttpRequest) -> dict[str, bytes]:
     return attachments
 
 
-def _target_deck_path(root_deck_path: str, card_payload: dict[str, Any]) -> str:
-    deck_parts = [str(part).strip() for part in (card_payload.get('deck_path') or []) if str(part).strip()]
-    if not root_deck_path:
-        return '/'.join(deck_parts)
-    if not deck_parts:
-        return root_deck_path
-    return '/'.join([root_deck_path, *deck_parts])
-
-
 def _normalise_obsidian_note_path(raw_path: Any) -> str:
     if not isinstance(raw_path, str):
         raise ValueError('obsidian_path must be a string')
@@ -340,7 +331,7 @@ def _serialise_obsidian_session(session: ImportSession) -> dict[str, Any]:
                 'unchanged': bool(card.get('unchanged')),
                 'warnings': list(card.get('warnings') or []),
                 'errors': list(card.get('errors') or []),
-                'target_deck_path': _target_deck_path(root_deck_path, card),
+                'target_deck_path': card['target_deck_path'],
                 'deck_path': list(card.get('deck_path') or []),
                 'will_write_back_id': bool(card.get('import_id')) and not bool(card.get('had_explicit_import_id')),
             }

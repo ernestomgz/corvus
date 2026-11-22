@@ -50,14 +50,14 @@ def test_obsidian_preview_create_and_fetch_with_media(api_client, user_factory, 
     assert data['status'] == 'ready'
     assert data['source_hash'] == 'hash-123'
     assert data['root_deck_path'] == 'STEM'
-    assert data['planned_decks'] == ['STEM/Math', 'STEM/Math/Functions']
+    assert data['planned_decks'] == ['STEM/Math', 'STEM/Math/Functions', 'STEM/Math/Functions/exponential.md']
     assert data['has_errors'] is False
     assert len(data['cards']) == 1
 
     card = data['cards'][0]
     assert card['marker_line'] == 3
     assert card['marker_kind'] == 'card'
-    assert card['target_deck_path'] == 'STEM/Math/Functions'
+    assert card['target_deck_path'] == 'STEM/Math/Functions/exponential.md'
     assert card['will_write_back_id'] is True
     assert settings.MEDIA_URL in card['back_md']
 
@@ -65,7 +65,7 @@ def test_obsidian_preview_create_and_fetch_with_media(api_client, user_factory, 
     assert detail_response.status_code == 200
     detail_data = detail_response.json()
     assert detail_data['session_id'] == data['session_id']
-    assert detail_data['cards'][0]['target_deck_path'] == 'STEM/Math/Functions'
+    assert detail_data['cards'][0]['target_deck_path'] == 'STEM/Math/Functions/exponential.md'
 
 
 def test_obsidian_preview_apply_creates_cards_and_nested_decks(api_client, user_factory, deck_factory):
@@ -108,7 +108,7 @@ def test_obsidian_preview_apply_creates_cards_and_nested_decks(api_client, user_
     math = Deck.objects.get(user=user, parent=root, name='Math')
     functions = Deck.objects.get(user=user, parent=math, name='Functions')
     card = Card.objects.get(user=user)
-    assert card.deck == functions
+    assert card.deck == Deck.objects.get(user=user, parent=functions, name='exponential.md')
     assert card.import_id == apply_data['cards'][0]['import_id']
 
 
@@ -192,15 +192,15 @@ def test_obsidian_preview_apply_updates_source_path_and_deck_without_content_cha
     preview_card = preview_data['cards'][0]
     assert preview_data['summary']['updates'] == 1
     assert preview_data['summary']['unchanged'] == 0
-    assert preview_data['planned_decks'] == ['STEM/Science']
+    assert preview_data['planned_decks'] == ['STEM/Science', 'STEM/Science/topic.md']
     assert preview_card['existing'] is True
     assert preview_card['has_changes'] is True
     assert preview_card['unchanged'] is False
     assert preview_card['existing_deck_path'] == 'STEM/Math'
-    assert preview_card['target_deck_path'] == 'STEM/Science'
+    assert preview_card['target_deck_path'] == 'STEM/Science/topic.md'
     assert preview_card['metadata_changes']['deck'] == {
         'from': 'STEM/Math',
-        'to': 'STEM/Science',
+        'to': 'STEM/Science/topic.md',
     }
     assert preview_card['metadata_changes']['source_path'] == {
         'from': 'Math/topic.md',
@@ -220,11 +220,11 @@ def test_obsidian_preview_apply_updates_source_path_and_deck_without_content_cha
     assert apply_response.status_code == 200
     apply_data = apply_response.json()
     assert apply_data['summary']['updated'] == 1
-    assert apply_data['summary']['decks_created'] == 1
+    assert apply_data['summary']['decks_created'] == 2
 
     science = Deck.objects.get(user=user, parent=root, name='Science')
     card.refresh_from_db()
-    assert card.deck == science
+    assert card.deck == Deck.objects.get(user=user, parent=science, name='topic.md')
     assert card.source_path == 'Science/topic.md'
     assert card.front_md == 'Question'
     assert card.back_md == 'Answer'

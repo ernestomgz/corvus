@@ -173,9 +173,11 @@ Capital of Italy #card-reverse id:10|11
 Rome
 ```
 
-## Folder To Deck Mapping
+## Note Decks
 
-Zip files may contain nested folders. Folder paths become deck paths. If no destination deck is selected, each Markdown file must be inside at least one folder.
+Each Markdown file gets its own deck, including the `.md` extension. Folders group those decks. With `STEM` selected as the parent, `Electronics/BJT.md` goes to `STEM/Electronics/BJT.md`. Leave the parent blank to import into `Electronics/BJT.md` at the top level. A standalone `.md` file can also be imported without a parent deck.
+
+Folder names ending in `.md` use `%2E` in place of the dot before `md`, and literal `%` in folder names becomes `%25`. The note and attachment paths used for media and study presets keep their original names.
 
 ## Media
 

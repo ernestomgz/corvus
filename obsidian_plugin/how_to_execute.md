@@ -15,6 +15,8 @@ Corvus must be reachable from Obsidian, for example:
 
 The configured Corvus root deck must already exist.
 
+Each synced note gets its own deck below that root. For example, with `STEM` as the root, `Electronics/BJT.md` syncs to `STEM/Electronics/BJT.md`. Use the preview to review proposed deck moves after renaming or moving a note. After a linked note moves, rerun the study preset command to refresh its saved source paths.
+
 
 ## Build The Plugin
 

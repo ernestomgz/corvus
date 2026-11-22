@@ -128,6 +128,12 @@ export class SyncPreviewModal extends Modal {
         text: "Writes ID to note",
       });
     }
+    if (card.metadata_changes?.deck) {
+      rightEl.createSpan({
+        cls: "corvus-preview-badge",
+        text: "Deck changes",
+      });
+    }
 
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
@@ -138,6 +144,7 @@ export class SyncPreviewModal extends Modal {
     });
     headerEl.prepend(checkbox);
 
+    this.renderMetadataChanges(cardEl, card);
     this.renderCardFace(cardEl, "Front", card.front_md || "(empty front)", "corvus-preview-card-front");
     this.renderCardFace(cardEl, "Back", card.back_md || "(empty back)", "corvus-preview-card-back");
 
@@ -160,6 +167,44 @@ export class SyncPreviewModal extends Modal {
     }
 
     return cardEl;
+  }
+
+  private renderMetadataChanges(parent: HTMLElement, card: PreviewCard): void {
+    const changes = card.metadata_changes ?? {};
+    const rows: string[] = [];
+
+    if (changes.deck) {
+      rows.push(`Deck: ${this.formatChangeValue(changes.deck.from)} -> ${this.formatChangeValue(changes.deck.to)}`);
+    }
+    if (changes.source_path) {
+      rows.push(
+        `Source note: ${this.formatChangeValue(changes.source_path.from)} -> ${this.formatChangeValue(
+          changes.source_path.to,
+        )}`,
+      );
+    }
+    if (changes.source_anchor) {
+      rows.push(
+        `Source anchor: ${this.formatChangeValue(changes.source_anchor.from)} -> ${this.formatChangeValue(
+          changes.source_anchor.to,
+        )}`,
+      );
+    }
+    if (rows.length === 0) {
+      return;
+    }
+
+    const metaEl = parent.createDiv({ cls: "corvus-preview-metadata" });
+    metaEl.createEl("strong", { text: "Metadata changes" });
+    const list = metaEl.createEl("ul");
+    for (const row of rows) {
+      list.createEl("li", { text: row });
+    }
+  }
+
+  private formatChangeValue(value: string | null | undefined): string {
+    const cleaned = (value ?? "").trim();
+    return cleaned || "(empty)";
   }
 
   private renderCardFace(

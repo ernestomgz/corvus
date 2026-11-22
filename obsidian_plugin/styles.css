@@ -5,6 +5,7 @@
 .corvus-preview-summary,
 .corvus-preview-card,
 .corvus-preview-decks,
+.corvus-preview-metadata,
 .corvus-preview-errors {
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
@@ -67,6 +68,16 @@
 .corvus-preview-card-front .markdown-rendered,
 .corvus-preview-card-back .markdown-rendered {
   padding: 0;
+}
+
+.corvus-preview-metadata {
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+
+.corvus-preview-metadata ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
 }
 
 .corvus-preview-badges {

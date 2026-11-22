@@ -50,8 +50,11 @@ export interface PreviewCard {
   import_id: string | null;
   front_md: string;
   back_md: string;
+  source_path: string;
   existing: boolean;
   existing_card_id: string | null;
+  existing_deck_path: string | null;
+  metadata_changes: PreviewMetadataChanges;
   has_changes: boolean;
   unchanged: boolean;
   warnings: string[];
@@ -59,6 +62,17 @@ export interface PreviewCard {
   target_deck_path: string;
   deck_path: string[];
   will_write_back_id: boolean;
+}
+
+export interface PreviewMetadataChange {
+  from: string;
+  to: string;
+}
+
+export interface PreviewMetadataChanges {
+  deck?: PreviewMetadataChange;
+  source_path?: PreviewMetadataChange;
+  source_anchor?: PreviewMetadataChange;
 }
 
 export interface PreviewSession {
@@ -93,6 +107,7 @@ export interface ApplyCardResult {
   card_id: string | null;
   marker_line: number | null;
   marker_kind: "card" | "reverse" | string | null;
+  source_path: string | null;
 }
 
 export interface ApplyResponse {

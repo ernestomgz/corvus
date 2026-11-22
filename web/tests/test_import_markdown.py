@@ -152,6 +152,42 @@ def test_md_import_id_update_existing(user_factory, deck_factory):
     assert card.back_md == 'Updated answer'
 
 
+def test_md_import_id_update_detects_source_path_only_change(user_factory, deck_factory):
+    user = user_factory()
+    root = deck_factory(user=user, name='STEM', parent=None)
+    markdown = 'Question\n#card id:abc1\nAnswer'
+
+    process_markdown_archive(
+        user=user,
+        deck=root,
+        uploaded_file=_build_zip({'Math/topic.md': markdown}),
+    )
+    math = Deck.objects.get(user=user, parent=root, name='Math')
+    card = Card.objects.get(user=user)
+    assert card.deck == math
+    assert card.source_path == 'Math/topic.md'
+
+    session = prepare_markdown_session(
+        user=user,
+        deck=root,
+        uploaded_file=_build_zip({'Math/renamed-topic.md': markdown}),
+    )
+    card_payload = session.payload['cards'][0]
+    assert card_payload['has_changes'] is True
+    assert card_payload['unchanged'] is False
+    assert card_payload['metadata_changes']['source_path'] == {
+        'from': 'Math/topic.md',
+        'to': 'Math/renamed-topic.md',
+    }
+
+    record = apply_markdown_session(session)
+    card.refresh_from_db()
+    assert record.summary['updated'] == 1
+    assert record.summary['skipped'] == 0
+    assert card.deck == math
+    assert card.source_path == 'Math/renamed-topic.md'
+
+
 def test_md_import_id_conflict_warning(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)
@@ -537,7 +573,7 @@ def test_import_long_card_supports_fenced_code_block_blank_lines(user_factory, d
 
 
 
-def test_import_updates_merge_tags(user_factory, deck_factory):
+def test_import_updates_replace_tags(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)
     markdown = '#card Fact\nid:: merge_demo\ntags:: math\n\nAnswer'
@@ -553,7 +589,7 @@ def test_import_updates_merge_tags(user_factory, deck_factory):
     record2 = process_markdown_archive(user=user, deck=deck, uploaded_file=updated_archive)
     assert record2.summary['updated'] == 1
     card.refresh_from_db()
-    assert card.tags == ['math', 'custom', 'spaced']
+    assert card.tags == ['spaced']
 
 
 def test_md_same_line_marker_does_not_include_previous_marker(user_factory, deck_factory):
@@ -1055,6 +1091,87 @@ def test_hierarchy_identical_to_card_front_removes_last_entry(user_factory, deck
         assert not context_line.endswith('Card Topic > Card Topic')
 
 
+def test_frontmatter_card_heading_context_false_removes_heading_prefix(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        '---\n'
+        'card-heading-context: false\n'
+        '---\n'
+        '# Title\n'
+        '## Subtitle\n'
+        'Question\n'
+        '#card\n'
+        'Solution'
+    )
+    archive = _build_zip({'note.md': markdown})
+    process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    card = Card.objects.get(user=user)
+
+    assert card.front_md == 'Question'
+    assert card.back_md == 'Solution'
+
+
+def test_frontmatter_card_heading_context_false_keeps_heading_as_question(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        '---\n'
+        'card-heading-context: false\n'
+        '---\n'
+        '# Title\n'
+        '## What is a derivative?\n'
+        '#card\n'
+        'Instantaneous rate of change.'
+    )
+    archive = _build_zip({'note.md': markdown})
+    process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    card = Card.objects.get(user=user)
+
+    assert card.front_md == 'What is a derivative?'
+    assert card.back_md == 'Instantaneous rate of change.'
+
+
+def test_frontmatter_card_heading_context_false_applies_to_reverse_back(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        '---\n'
+        'card-heading-context: false\n'
+        '---\n'
+        '# Title\n'
+        '## Subtitle\n'
+        'Question\n'
+        '#card-reverse\n'
+        'Solution'
+    )
+    archive = _build_zip({'note.md': markdown})
+    process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+    cards = list(Card.objects.filter(user=user).order_by('created_at'))
+
+    assert cards[0].front_md == 'Question'
+    assert cards[0].back_md == 'Solution'
+    assert cards[1].front_md == 'Solution'
+    assert cards[1].back_md == 'Question'
+
+
+def test_frontmatter_card_heading_context_invalid_value_errors(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        '---\n'
+        'card-heading-context: sometimes\n'
+        '---\n'
+        'Question\n'
+        '#card\n'
+        'Answer'
+    )
+    archive = _build_zip({'note.md': markdown})
+
+    with pytest.raises(MarkdownImportError, match="'card-heading-context' must be a boolean"):
+        process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+
+
 # ============================================================================
 # EDGE CASES: Reverse Cards
 # ============================================================================
@@ -1157,6 +1274,65 @@ def test_tags_parsing_with_comma_separator(user_factory, deck_factory):
     assert 'foo' in card.tags
     assert 'bar' in card.tags
     assert 'baz' in card.tags
+
+
+def test_frontmatter_card_tags_apply_to_all_cards(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    markdown = (
+        '---\n'
+        'card-tags:\n'
+        '  - calculus\n'
+        '  - exam\n'
+        '---\n'
+        'First question\n'
+        '#card\n'
+        'First answer\n'
+        '\n'
+        'Second question\n'
+        '#card\n'
+        'tags:: practice\n'
+        'Second answer'
+    )
+    archive = _build_zip({'note.md': markdown})
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
+
+    assert record.summary['created'] == 2
+    cards = list(Card.objects.filter(user=user).order_by('front_md'))
+    assert cards[0].tags == ['calculus', 'exam']
+    assert cards[1].tags == ['calculus', 'exam', 'practice']
+
+
+def test_frontmatter_card_tags_replace_on_update(user_factory, deck_factory):
+    user = user_factory()
+    deck = deck_factory(user=user)
+    initial_markdown = (
+        '---\n'
+        'card-tags: calculus, exam\n'
+        '---\n'
+        'Question\n'
+        '#card id:abc1\n'
+        'Answer'
+    )
+    updated_markdown = (
+        '---\n'
+        'card-tags:\n'
+        '  - algebra\n'
+        '---\n'
+        'Updated question\n'
+        '#card id:abc1\n'
+        'Updated answer'
+    )
+
+    process_markdown_archive(user=user, deck=deck, uploaded_file=_build_zip({'note.md': initial_markdown}))
+    card = Card.objects.get(user=user)
+    assert card.tags == ['calculus', 'exam']
+
+    record = process_markdown_archive(user=user, deck=deck, uploaded_file=_build_zip({'note.md': updated_markdown}))
+    card.refresh_from_db()
+    assert record.summary['updated'] == 1
+    assert card.tags == ['algebra']
+    assert card.front_md == 'Updated question'
 
 
 def test_tags_replace_on_update(user_factory, deck_factory):

@@ -1,7 +1,12 @@
 import { App, TFile, normalizePath } from "obsidian";
 
 import { sha256Hex } from "./hash";
-import type { NoteAttachment, NoteSyncSource, StudySetLinkSource, StudySetSource } from "./types";
+import type {
+  NoteAttachment,
+  NoteSyncSource,
+  StudySetLinkSource,
+  StudySetSource,
+} from "./types";
 
 const WIKI_EMBED_RE = /!\[\[([^\]]+)\]\]/g;
 const MARKDOWN_IMAGE_RE = /!\[[^\]]*]\(([^)]+)\)/g;
@@ -18,15 +23,16 @@ const LOCAL_MEDIA_EXTENSIONS = new Set([
 
 export async function collectCurrentNoteSource(app: App): Promise<NoteSyncSource> {
   const file = getActiveMarkdownFile(app);
-  const content = await app.vault.cachedRead(file);
-  const sourceHash = await sha256Hex(content);
-  const attachments = await collectAttachments(app, file, content);
+  const originalContent = await app.vault.cachedRead(file);
+  const attachmentFiles = new Map<string, TFile>();
+  const content = collectAttachmentsAndRewriteContent(app, file, originalContent, attachmentFiles);
+  const attachments = await readAttachments(app, attachmentFiles);
 
   return {
     file,
     path: file.path,
     content,
-    sourceHash,
+    sourceHash: await sha256Hex(originalContent),
     attachments,
   };
 }
@@ -35,7 +41,7 @@ export async function collectCurrentStudySetSource(app: App): Promise<StudySetSo
   const file = getActiveMarkdownFile(app);
   const content = await app.vault.cachedRead(file);
   const sourceHash = await sha256Hex(content);
-  const links = collectLinkedMarkdownNotes(app, file);
+  const links = await collectLinkedMarkdownNotes(app, file);
   if (links.length === 0) {
     throw new Error("The current note does not contain any markdown note links for a Corvus study preset.");
   }
@@ -57,7 +63,7 @@ function getActiveMarkdownFile(app: App): TFile {
   return file;
 }
 
-function collectLinkedMarkdownNotes(app: App, noteFile: TFile): StudySetLinkSource[] {
+async function collectLinkedMarkdownNotes(app: App, noteFile: TFile): Promise<StudySetLinkSource[]> {
   const metadata = app.metadataCache.getFileCache(noteFile);
   const links = metadata?.links ?? [];
   const linkedNotes = new Map<string, StudySetLinkSource>();
@@ -76,19 +82,118 @@ function collectLinkedMarkdownNotes(app: App, noteFile: TFile): StudySetLinkSour
     if (!(linkedFile instanceof TFile) || linkedFile.extension !== "md") {
       continue;
     }
-    if (!linkedNotes.has(linkedFile.path)) {
-      linkedNotes.set(linkedFile.path, {
-        linkText,
-        obsidianPath: linkedFile.path,
-      });
-    }
+    addStudySetLink(linkedNotes, linkedFile, linkText);
+    await addQuestionsSourceLinks(app, linkedFile, linkedNotes);
   }
 
   return Array.from(linkedNotes.values());
 }
 
-async function collectAttachments(app: App, noteFile: TFile, content: string): Promise<NoteAttachment[]> {
-  const attachmentFiles = new Map<string, TFile>();
+async function addQuestionsSourceLinks(
+  app: App,
+  sourceNote: TFile,
+  linkedNotes: Map<string, StudySetLinkSource>,
+): Promise<void> {
+  const content = await app.vault.cachedRead(sourceNote);
+  for (const linkText of extractQuestionsSourceLinks(app, sourceNote, content)) {
+    const linkedFile = app.metadataCache.getFirstLinkpathDest(linkText, sourceNote.path);
+    if (!(linkedFile instanceof TFile) || linkedFile.extension !== "md") {
+      throw new Error(`Question source note not found: ${linkText}`);
+    }
+    addStudySetLink(linkedNotes, linkedFile, linkText);
+  }
+}
+
+function addStudySetLink(
+  linkedNotes: Map<string, StudySetLinkSource>,
+  linkedFile: TFile,
+  linkText: string,
+): void {
+  if (!linkedNotes.has(linkedFile.path)) {
+    linkedNotes.set(linkedFile.path, {
+      linkText,
+      obsidianPath: linkedFile.path,
+    });
+  }
+}
+
+function extractQuestionsSourceLinks(app: App, noteFile: TFile, content: string): string[] {
+  const metadata = app.metadataCache.getFileCache(noteFile);
+  const rawValue = metadata?.frontmatter?.["questions-source"];
+  const values = rawValue === undefined || rawValue === null
+    ? parseQuestionsSourceFromFrontmatter(content)
+    : Array.isArray(rawValue)
+      ? rawValue
+      : [rawValue];
+
+  if (values.length === 0) {
+    return [];
+  }
+
+  const links: string[] = [];
+  for (const value of values) {
+    const text = String(value);
+    const matches = Array.from(text.matchAll(/\[\[([^\]]+)\]\]/g));
+    if (matches.length === 0 && text.trim()) {
+      throw new Error("questions-source must contain Obsidian wiki link(s).");
+    }
+    for (const match of matches) {
+      const rawLink = match[1] ?? "";
+      if (rawLink.includes("#") || rawLink.includes("^")) {
+        throw new Error("questions-source links must point to markdown notes, not blocks.");
+      }
+      const linkText = stripWikiTarget(rawLink);
+      if (!linkText) {
+        continue;
+      }
+      links.push(linkText);
+    }
+  }
+  return links;
+}
+
+function parseQuestionsSourceFromFrontmatter(content: string): string[] {
+  const lines = content.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") {
+    return [];
+  }
+
+  const values: string[] = [];
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() === "---" || line.trim() === "...") {
+      break;
+    }
+    const match = line.match(/^questions-source\s*:\s*(.*)$/);
+    if (!match) {
+      continue;
+    }
+
+    const inlineValue = (match[1] ?? "").trim();
+    if (inlineValue) {
+      values.push(inlineValue);
+      continue;
+    }
+
+    for (let listIndex = index + 1; listIndex < lines.length; listIndex += 1) {
+      const listLine = lines[listIndex];
+      if (!/^\s+-\s+/.test(listLine)) {
+        break;
+      }
+      values.push(listLine.replace(/^\s+-\s+/, "").trim());
+    }
+    break;
+  }
+  return values;
+}
+
+function collectAttachmentsAndRewriteContent(
+  app: App,
+  noteFile: TFile,
+  content: string,
+  attachmentFiles: Map<string, TFile>,
+): string {
+  const rewrites: TextRewrite[] = [];
 
   for (const match of content.matchAll(WIKI_EMBED_RE)) {
     const rawTarget = match[1] ?? "";
@@ -96,17 +201,34 @@ async function collectAttachments(app: App, noteFile: TFile, content: string): P
     const attachment = resolveWikiAttachment(app, noteFile, cleanTarget);
     if (attachment) {
       attachmentFiles.set(attachment.path, attachment);
+      const targetStart = (match.index ?? 0) + 3;
+      rewrites.push({
+        start: targetStart,
+        end: targetStart + rawTarget.length,
+        replacement: rewriteWikiTarget(rawTarget, attachment.path),
+      });
     }
   }
 
   for (const match of content.matchAll(MARKDOWN_IMAGE_RE)) {
-    const rawTarget = stripMarkdownTarget(match[1] ?? "");
+    const originalTarget = match[1] ?? "";
+    const rawTarget = stripMarkdownTarget(originalTarget);
     const attachment = resolveRelativeAttachment(app, noteFile, rawTarget);
     if (attachment) {
       attachmentFiles.set(attachment.path, attachment);
+      const targetStart = (match.index ?? 0) + match[0].lastIndexOf("(") + 1;
+      rewrites.push({
+        start: targetStart,
+        end: targetStart + originalTarget.length,
+        replacement: attachment.path,
+      });
     }
   }
 
+  return applyTextRewrites(content, rewrites);
+}
+
+async function readAttachments(app: App, attachmentFiles: Map<string, TFile>): Promise<NoteAttachment[]> {
   const attachments: NoteAttachment[] = [];
   let index = 0;
   for (const file of attachmentFiles.values()) {
@@ -128,6 +250,14 @@ function stripWikiTarget(rawTarget: string): string {
   const [beforePipe] = rawTarget.split("|", 1);
   const [beforeAnchor] = beforePipe.split("#", 1);
   return beforeAnchor.trim();
+}
+
+function rewriteWikiTarget(rawTarget: string, resolvedPath: string): string {
+  const pipeIndex = rawTarget.indexOf("|");
+  if (pipeIndex === -1) {
+    return resolvedPath;
+  }
+  return `${resolvedPath}${rawTarget.slice(pipeIndex)}`;
 }
 
 function stripMarkdownTarget(rawTarget: string): string {
@@ -166,6 +296,24 @@ function resolveRelativeAttachment(app: App, noteFile: TFile, relativePath: stri
 
 function isLocalMediaFile(file: TFile): boolean {
   return LOCAL_MEDIA_EXTENSIONS.has(file.extension.toLowerCase());
+}
+
+interface TextRewrite {
+  start: number;
+  end: number;
+  replacement: string;
+}
+
+function applyTextRewrites(content: string, rewrites: TextRewrite[]): string {
+  if (rewrites.length === 0) {
+    return content;
+  }
+
+  let rewritten = content;
+  for (const rewrite of [...rewrites].sort((a, b) => b.start - a.start)) {
+    rewritten = `${rewritten.slice(0, rewrite.start)}${rewrite.replacement}${rewritten.slice(rewrite.end)}`;
+  }
+  return rewritten;
 }
 
 function detectContentType(extension: string): string {

@@ -159,6 +159,77 @@ def test_obsidian_preview_apply_updates_existing_card_by_import_id(
     assert card.back_md == 'Updated back'
 
 
+def test_obsidian_preview_apply_updates_source_path_and_deck_without_content_change(
+    api_client,
+    user_factory,
+    deck_factory,
+    card_factory,
+):
+    user = user_factory()
+    root = deck_factory(user=user, name='STEM', parent=None)
+    math = deck_factory(user=user, parent=root, name='Math')
+    card = card_factory(
+        user=user,
+        deck=math,
+        front_md='Question',
+        back_md='Answer',
+        import_id='abc123',
+        source_path='Math/topic.md',
+    )
+    api_client.force_login(user)
+
+    preview_response = api_client.post(
+        '/api/v1/obsidian/preview',
+        data=_preview_payload(
+            source_path='Science/topic.md',
+            content='Question\n#card id:abc123\nAnswer',
+            root_deck_path='STEM',
+            source_hash='hash-move',
+        ),
+    )
+    assert preview_response.status_code == 201
+    preview_data = preview_response.json()
+    preview_card = preview_data['cards'][0]
+    assert preview_data['summary']['updates'] == 1
+    assert preview_data['summary']['unchanged'] == 0
+    assert preview_data['planned_decks'] == ['STEM/Science']
+    assert preview_card['existing'] is True
+    assert preview_card['has_changes'] is True
+    assert preview_card['unchanged'] is False
+    assert preview_card['existing_deck_path'] == 'STEM/Math'
+    assert preview_card['target_deck_path'] == 'STEM/Science'
+    assert preview_card['metadata_changes']['deck'] == {
+        'from': 'STEM/Math',
+        'to': 'STEM/Science',
+    }
+    assert preview_card['metadata_changes']['source_path'] == {
+        'from': 'Math/topic.md',
+        'to': 'Science/topic.md',
+    }
+
+    apply_response = api_client.post(
+        f"/api/v1/obsidian/preview/{preview_data['session_id']}/apply",
+        data=json.dumps(
+            {
+                'source_hash': 'hash-move',
+                'decisions': [{'index': 0, 'action': 'apply'}],
+            }
+        ),
+        content_type='application/json',
+    )
+    assert apply_response.status_code == 200
+    apply_data = apply_response.json()
+    assert apply_data['summary']['updated'] == 1
+    assert apply_data['summary']['decks_created'] == 1
+
+    science = Deck.objects.get(user=user, parent=root, name='Science')
+    card.refresh_from_db()
+    assert card.deck == science
+    assert card.source_path == 'Science/topic.md'
+    assert card.front_md == 'Question'
+    assert card.back_md == 'Answer'
+
+
 def test_obsidian_preview_apply_rejects_source_hash_mismatch(api_client, user_factory, deck_factory):
     user = user_factory()
     deck_factory(user=user, name='STEM', parent=None)

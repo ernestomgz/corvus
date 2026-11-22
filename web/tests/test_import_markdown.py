@@ -4,7 +4,7 @@ import zipfile
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from core.models import Card, Deck
+from core.models import Card
 from import_md.services import (
     MarkdownImportError,
     apply_markdown_session,
@@ -36,7 +36,7 @@ def test_md_card_extraction(user_factory, deck_factory):
     card = Card.objects.get(user=user)
     assert card.front_md.startswith('What is')
     assert card.back_md == 'Four'
-    assert card.deck == deck
+    assert card.deck.full_path() == f'{deck.full_path()}/notes/sample.md'
 
 
 def test_md_upsert_preserves_state(card_factory, external_id_factory):
@@ -152,7 +152,7 @@ def test_md_import_id_update_existing(user_factory, deck_factory):
     assert card.back_md == 'Updated answer'
 
 
-def test_md_import_id_update_detects_source_path_only_change(user_factory, deck_factory):
+def test_md_import_id_update_detects_note_rename(user_factory, deck_factory):
     user = user_factory()
     root = deck_factory(user=user, name='STEM', parent=None)
     markdown = 'Question\n#card id:abc1\nAnswer'
@@ -162,9 +162,8 @@ def test_md_import_id_update_detects_source_path_only_change(user_factory, deck_
         deck=root,
         uploaded_file=_build_zip({'Math/topic.md': markdown}),
     )
-    math = Deck.objects.get(user=user, parent=root, name='Math')
     card = Card.objects.get(user=user)
-    assert card.deck == math
+    assert card.deck.full_path() == 'STEM/Math/topic.md'
     assert card.source_path == 'Math/topic.md'
 
     session = prepare_markdown_session(
@@ -184,7 +183,7 @@ def test_md_import_id_update_detects_source_path_only_change(user_factory, deck_
     card.refresh_from_db()
     assert record.summary['updated'] == 1
     assert record.summary['skipped'] == 0
-    assert card.deck == math
+    assert card.deck.full_path() == 'STEM/Math/renamed-topic.md'
     assert card.source_path == 'Math/renamed-topic.md'
 
 
@@ -223,15 +222,14 @@ def test_md_import_id_invalid_format(user_factory, deck_factory):
     assert any('Invalid import ID format' in error for error in card_data['errors'])
 
 
-def test_md_import_skips_root_folder(user_factory, deck_factory):
+def test_md_import_preserves_folder_matching_selected_root(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user, name='Biology')
     archive = _build_zip({'Biology/note.md': 'Question\n#card\nAnswer'})
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     assert record.summary['created'] == 1
     card = Card.objects.get(user=user)
-    assert card.deck == deck
-    assert Deck.objects.filter(user=user, parent=deck, name='Biology').count() == 0
+    assert card.deck.full_path() == 'Biology/Biology/note.md'
 
 
 def test_prepare_markdown_session_creates_payload(user_factory, deck_factory):
@@ -243,7 +241,7 @@ def test_prepare_markdown_session_creates_payload(user_factory, deck_factory):
     assert session.total == 1
     payload = session.payload
     assert payload['cards'][0]['external_key']
-    assert payload['cards'][0]['deck_path'] == ['cards']
+    assert payload['cards'][0]['deck_path'] == ['cards', 'note.md']
 
 
 def test_apply_markdown_session_respects_decision(card_factory, external_id_factory):
@@ -257,6 +255,7 @@ def test_apply_markdown_session_respects_decision(card_factory, external_id_fact
     existing_card.refresh_from_db()
     assert existing_card.front_md == 'Original'
     assert existing_card.back_md == 'Answer'
+    assert not existing_card.deck.children.exists()
 
 
 def test_apply_markdown_session_creates_child_decks(user_factory, deck_factory):
@@ -267,11 +266,9 @@ def test_apply_markdown_session_creates_child_decks(user_factory, deck_factory):
     session = prepare_markdown_session(user=user, deck=root_deck, uploaded_file=archive)
     record = apply_markdown_session(session)
     assert record.summary['created'] == 1
-    assert record.summary['decks_created'] >= 2
-    sciences = Deck.objects.get(user=user, parent=root_deck, name='Sciences')
-    math = Deck.objects.get(user=user, parent=sciences, name='Math')
+    assert record.summary['decks_created'] == 3
     card = Card.objects.get(user=user)
-    assert card.deck == math
+    assert card.deck.full_path() == f'{root_deck.full_path()}/Sciences/Math/note.md'
 
 
 def test_md_card_marker_variations(user_factory, deck_factory):
@@ -328,14 +325,21 @@ def test_md_reverse_card_moves_hierarchy_to_back(user_factory, deck_factory):
     assert cards[1].back_md.splitlines()[1] == 'Description'
 
 
-def test_prepare_session_requires_folders_without_root_deck(user_factory):
+@pytest.mark.parametrize('is_archive', [True, False])
+def test_import_creates_a_top_level_note_deck(user_factory, is_archive):
     user = user_factory()
-    archive = _build_zip({'note.md': '#card Lonely\n\nBack'})
-    session = prepare_markdown_session(user=user, deck=None, uploaded_file=archive)
-    payload = session.payload
-    assert payload['summary']['has_errors'] is True
-    card = payload['cards'][0]
-    assert any('folder' in error.lower() for error in card['errors'])
+    markdown = 'Lonely\n#card\nBack'
+    if is_archive:
+        upload = _build_zip({'note.md': markdown})
+    else:
+        upload = SimpleUploadedFile('note.md', markdown.encode(), content_type='text/markdown')
+    session = prepare_markdown_session(user=user, deck=None, uploaded_file=upload)
+    assert session.payload['cards'][0]['target_deck_path'] == 'note.md'
+    record = apply_markdown_session(session)
+    assert record.summary['created'] == 1
+    deck = Card.objects.get(user=user).deck
+    assert deck.name == 'note.md'
+    assert deck.parent_id is None
 
 
 def test_prepare_session_detects_missing_attachments(user_factory):
@@ -356,10 +360,8 @@ def test_apply_session_builds_decks_from_archive_when_no_root(user_factory):
     session = prepare_markdown_session(user=user, deck=None, uploaded_file=archive)
     record = apply_markdown_session(session)
     assert record.summary['created'] == 1
-    math = Deck.objects.get(user=user, parent=None, name='Mathematics')
-    equations = Deck.objects.get(user=user, parent=math, name='Equations')
     card = Card.objects.get(user=user)
-    assert card.deck == equations
+    assert card.deck.full_path() == 'Mathematics/Equations/differentials.md'
 
 
 def test_markdown_hierarchy_populates_front_lines(user_factory, deck_factory):
@@ -1363,58 +1365,22 @@ def test_tags_replace_on_update(user_factory, deck_factory):
 # EDGE CASES: Deck Path Handling
 # ============================================================================
 
-def test_deck_path_skips_default_folder(user_factory):
-    """Test that 'default' folder name is skipped from deck path."""
-    user = user_factory()
-    markdown = 'Q\n#card\nA'
-    archive = _build_zip({'default/note.md': markdown})
-    session = prepare_markdown_session(user=user, deck=None, uploaded_file=archive)
-    card = session.payload['cards'][0]
-    
-    # default should be stripped
-    assert card['deck_path'] == []
-
-
-def test_deck_path_skips_notes_folder_at_root(user_factory):
-    """Test that 'notes' folder is skipped when it's the root."""
-    user = user_factory()
-    markdown = 'Q\n#card\nA'
-    archive = _build_zip({'notes/note.md': markdown})
-    session = prepare_markdown_session(user=user, deck=None, uploaded_file=archive)
-    card = session.payload['cards'][0]
-    
-    # notes should be stripped when at root level
-    assert card['deck_path'] == []
-
-
-def test_deck_path_complex_nested_structure(user_factory, deck_factory):
-    """Test complex nested deck path handling."""
+def test_note_decks_are_distinct_and_keep_source_paths(user_factory, deck_factory):
     user = user_factory()
     root = deck_factory(user=user, name='Root')
-    markdown = 'Q\n#card\nA'
-    archive = _build_zip({'Root/A/B/C/note.md': markdown})
-    session = prepare_markdown_session(user=user, deck=root, uploaded_file=archive)
-    card = session.payload['cards'][0]
-    
-    # Root should be stripped, only A/B/C remain
-    assert card['deck_path'] == ['A', 'B', 'C']
-    
-    # Apply and verify nested decks are created
-    record = apply_markdown_session(session)
-    created_card = Card.objects.get(user=user)
-    
-    # Navigate down the deck hierarchy
-    current = created_card.deck
-    path = [current.name]
-    while current.parent:
-        current = current.parent
-        path.append(current.name)
-    
-    path.reverse()
-    assert path[0] == 'Root'
-    assert 'A' in path
-    assert 'B' in path
-    assert 'C' in path
+    targets = {
+        'Notes/topic.md': 'Root/Notes/topic.md',
+        'Notes/another.md': 'Root/Notes/another.md',
+        'Default/topic.md': 'Root/Default/topic.md',
+        'Notes/topic.md/child.md': 'Root/Notes/topic%2Emd/child.md',
+        'Notes/topic%2Emd/child.md': 'Root/Notes/topic%252Emd/child.md',
+    }
+    upload = _build_zip(dict.fromkeys(targets, 'Question\n#card\nAnswer'))
+    session = prepare_markdown_session(user=user, deck=root, uploaded_file=upload)
+    assert {card['source_path']: card['target_deck_path'] for card in session.payload['cards']} == targets
+
+    apply_markdown_session(session)
+    assert {card.source_path: card.deck.full_path() for card in Card.objects.filter(user=user)} == targets
 
 
 # ============================================================================
@@ -1470,13 +1436,11 @@ def test_multiple_cards_with_mixed_long_and_short(user_factory, deck_factory):
     assert 'Answer 2' in cards[2].back_md
 
 
-def test_whitespace_only_deck_path_is_ignored(user_factory):
-    """Test that empty or whitespace-only deck paths are normalized away."""
-    user = user_factory()
-    markdown = 'Q\n#card\nA'
-    # Paths with spaces and empty parts
-    archive = _build_zip({'  / Notes / / Valid\n/note.md': markdown})
-    # This tests the normalization logic
+@pytest.mark.parametrize('path', [' /note.md', 'Notes/../note.md', '/note.md', 'C:/note.md'])
+def test_import_rejects_invalid_relative_note_path(user_factory, path):
+    upload = _build_zip({path: 'Q\n#card\nA'})
+    with pytest.raises(MarkdownImportError, match='Expected a relative file path'):
+        prepare_markdown_session(user=user_factory(), deck=None, uploaded_file=upload)
 
 
 def test_card_with_inline_markers_cleaned_from_front(user_factory, deck_factory):

@@ -26,7 +26,7 @@
 
     {% if has_errors %}
         <div class="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            Some notes contain validation errors (missing folders or attachments). Fix the archive and re-upload before applying.
+            Some notes contain validation errors. Fix the source files and upload them again before applying.
         </div>
     {% endif %}
     {% if summary.unchanged %}
@@ -46,7 +46,7 @@
                             <div class="flex items-start justify-between gap-4">
                                 <div>
                                     <div class="text-xs uppercase tracking-wide text-gray-500">Deck</div>
-                                    <div class="text-sm text-gray-700">{{ card.deck_path|join:' / ' }}</div>
+                                    <div class="text-sm text-gray-700">{{ card.target_deck_path }}</div>
                                     {% if card.import_id %}
                                         <div class="text-xs uppercase tracking-wide text-gray-500 mt-1">ID</div>
                                         <div class="text-sm text-gray-700 font-mono">{{ card.import_id }}</div>
@@ -109,7 +109,10 @@
                                 <div class="flex flex-wrap items-center justify-between gap-2">
                                     <div>
                                         <div class="text-xs uppercase tracking-wide text-gray-500">Deck</div>
-                                        <div class="text-sm text-gray-700">{{ card.deck_path|join:' / ' }}</div>
+                                        <div class="text-sm text-gray-700">{{ card.target_deck_path }}</div>
+                                        {% if card.metadata_changes.deck %}
+                                            <div class="text-xs text-gray-500">Moves from {{ card.metadata_changes.deck.from }}</div>
+                                        {% endif %}
                                         {% if card.import_id %}
                                             <div class="text-xs uppercase tracking-wide text-gray-500 mt-1">ID</div>
                                             <div class="text-sm text-gray-700 font-mono">{{ card.import_id }}</div>

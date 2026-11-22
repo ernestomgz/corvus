@@ -24,6 +24,10 @@ const LOCAL_MEDIA_EXTENSIONS = new Set([
 export async function collectCurrentNoteSource(app: App): Promise<NoteSyncSource> {
   const file = getActiveMarkdownFile(app);
   const originalContent = await app.vault.cachedRead(file);
+  return await collectNoteSource(app, file, originalContent);
+}
+
+export async function collectNoteSource(app: App, file: TFile, originalContent: string): Promise<NoteSyncSource> {
   const attachmentFiles = new Map<string, TFile>();
   const content = collectAttachmentsAndRewriteContent(app, file, originalContent, attachmentFiles);
   const attachments = await readAttachments(app, attachmentFiles);

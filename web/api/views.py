@@ -36,6 +36,7 @@ from import_anki.services import AnkiImportError, process_apkg_archive
 from import_md.services import (
     MarkdownImportError,
     apply_markdown_session,
+    audit_markdown_note,
     cancel_markdown_session,
     prepare_markdown_note_session,
     process_markdown_archive,
@@ -145,15 +146,6 @@ def _extract_obsidian_attachments(request: HttpRequest) -> dict[str, bytes]:
             raise ValueError(f"attachment file missing for field '{item['field']}'")
         attachments[item['path']] = upload.read()
     return attachments
-
-
-def _target_deck_path(root_deck_path: str, card_payload: dict[str, Any]) -> str:
-    deck_parts = [str(part).strip() for part in (card_payload.get('deck_path') or []) if str(part).strip()]
-    if not root_deck_path:
-        return '/'.join(deck_parts)
-    if not deck_parts:
-        return root_deck_path
-    return '/'.join([root_deck_path, *deck_parts])
 
 
 def _normalise_obsidian_note_path(raw_path: Any) -> str:
@@ -340,7 +332,7 @@ def _serialise_obsidian_session(session: ImportSession) -> dict[str, Any]:
                 'unchanged': bool(card.get('unchanged')),
                 'warnings': list(card.get('warnings') or []),
                 'errors': list(card.get('errors') or []),
-                'target_deck_path': _target_deck_path(root_deck_path, card),
+                'target_deck_path': card['target_deck_path'],
                 'deck_path': list(card.get('deck_path') or []),
                 'will_write_back_id': bool(card.get('import_id')) and not bool(card.get('had_explicit_import_id')),
             }
@@ -933,7 +925,7 @@ def _get_obsidian_session(user: User, session_id: str) -> ImportSession:
 
 @csrf_exempt
 @require_http_methods(['POST'])
-def obsidian_preview_create(request: HttpRequest) -> JsonResponse:
+def obsidian_preview_create(request: HttpRequest, *, audit: bool = False) -> JsonResponse:
     try:
         user = _require_user(request)
     except PermissionError as exc:
@@ -953,6 +945,10 @@ def obsidian_preview_create(request: HttpRequest) -> JsonResponse:
 
     try:
         attachments = _extract_obsidian_attachments(request)
+        if audit:
+            return JsonResponse(audit_markdown_note(
+                user=user, root_deck=root_deck, source_path=source_path, content=content, attachments=attachments,
+            ))
         session = prepare_markdown_note_session(
             user=user,
             root_deck=root_deck,

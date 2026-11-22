@@ -11,7 +11,7 @@
                 <div class="mb-4">
                     {{ markdown_form.deck.label_tag }}
                     {{ markdown_form.deck }}
-                    <p class="mt-1 text-xs text-gray-500">Leave blank to create decks from the folders inside your archive.</p>
+                    <p class="mt-1 text-xs text-gray-500">Each Markdown note gets its own deck. Leave the parent deck blank to import at the top level.</p>
                     {% if markdown_form.deck.errors %}
                         <p class="text-sm text-red-600">{{ markdown_form.deck.errors.0 }}</p>
                     {% endif %}

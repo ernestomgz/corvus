@@ -2,7 +2,11 @@ import json
 
 import pytest
 
-from core.models import StudySet
+from core.models import Card, StudySet
+from core.services.review import StudyScope, _scoped_states
+from import_md.services import process_markdown_archive
+
+from .test_import_markdown import _build_zip
 
 pytestmark = pytest.mark.django_db
 
@@ -152,14 +156,13 @@ def test_obsidian_study_set_apply_accepts_main_and_question_source_paths(
     api_client,
     user_factory,
     deck_factory,
-    card_factory,
 ):
     user = user_factory()
     root = deck_factory(user=user, name='STEM', parent=None)
-    function_deck = deck_factory(user=user, name='Function Deck', parent=root)
-    question_deck = deck_factory(user=user, name='Questions Deck', parent=root)
-    card_factory(user=user, deck=function_deck, source_path='Function.md')
-    card_factory(user=user, deck=question_deck, source_path='Questions Function.md')
+    source_paths = ['Math/Function.md', 'Math/Questions Function.md']
+    paths = [*source_paths, 'Math/Other.md']
+    upload = _build_zip(dict.fromkeys(paths, 'Question\n#card\nAnswer'))
+    process_markdown_archive(user=user, deck=root, uploaded_file=upload)
     api_client.force_login(user)
 
     response = _post_json(
@@ -168,16 +171,22 @@ def test_obsidian_study_set_apply_accepts_main_and_question_source_paths(
         _study_set_payload(
             name='Test preset',
             links=[
-                {'link_text': 'Function', 'obsidian_path': 'Function.md'},
-                {'link_text': 'Questions Function', 'obsidian_path': 'Questions Function.md'},
+                {'link_text': 'Function', 'obsidian_path': source_paths[0]},
+                {'link_text': 'Questions Function', 'obsidian_path': source_paths[1]},
             ],
         ),
     )
 
     assert response.status_code == 201
-    assert response.json()['study_set']['source_paths'] == ['Function.md', 'Questions Function.md']
+    assert response.json()['study_set']['source_paths'] == source_paths
     study_set = StudySet.objects.get(user=user, name='Test preset')
-    assert study_set.source_paths == ['Function.md', 'Questions Function.md']
+    assert study_set.source_paths == source_paths
+
+    note = Card.objects.get(user=user, source_path=source_paths[0])
+    assert set(_scoped_states(user, deck=note.deck).values_list('card__source_path', flat=True)) == {source_paths[0]}
+    assert set(_scoped_states(user, deck=note.deck.parent).values_list('card__source_path', flat=True)) == set(paths)
+    scope = StudyScope.from_study_set(study_set)
+    assert set(_scoped_states(user, scope=scope).values_list('card__source_path', flat=True)) == set(source_paths)
 
 
 def test_obsidian_study_set_apply_updates_existing_preset_by_name(

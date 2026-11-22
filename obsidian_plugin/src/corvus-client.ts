@@ -4,6 +4,7 @@ import type {
   ApplyDecision,
   ApplyResponse,
   CorvusPluginSettings,
+  NoteSyncAudit,
   NoteSyncSource,
   PreviewSession,
   StudySetApplyResponse,
@@ -37,6 +38,19 @@ export class CorvusClient {
   }
 
   async createPreview(source: NoteSyncSource): Promise<PreviewSession> {
+    return await this.sendNote("/api/v1/obsidian/preview", source);
+  }
+
+  async auditNote(source: NoteSyncSource): Promise<NoteSyncAudit> {
+    try {
+      return await this.sendNote("/api/v1/obsidian/audit-note", source);
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      throw new Error(`${error.message} (note: ${source.path})`);
+    }
+  }
+
+  private async sendNote<T>(path: string, source: NoteSyncSource): Promise<T> {
     const manifest = source.attachments.map((attachment) => ({
       field: attachment.field,
       path: attachment.path,
@@ -57,7 +71,7 @@ export class CorvusClient {
       })),
     );
 
-    return await this.requestJson("/api/v1/obsidian/preview", {
+    return await this.requestJson(path, {
       method: "POST",
       body,
       headers: {
@@ -148,11 +162,21 @@ export class CorvusClient {
 
     this.captureCookies(response.headers as Record<string, HeaderValue>);
 
-    if (response.status < 200 || response.status >= 300) {
-      throw new Error(this.extractError(response));
+    const status = `${options.method} ${path} returned HTTP ${response.status}`;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(response.text);
+    } catch {
+      const format = response.text.trimStart().startsWith("<") ? "HTML" : "a non-JSON response";
+      throw new Error(`${status} (${format}). Check the Corvus server or proxy logs.`);
     }
 
-    return response.json as T;
+    if (response.status < 200 || response.status >= 300) {
+      const detail = (payload as { error?: unknown } | null)?.error;
+      throw new Error(typeof detail === "string" && detail.trim() ? `${status}: ${detail}` : status);
+    }
+
+    return payload as T;
   }
 
   private cookieHeader(): string {
@@ -183,20 +207,5 @@ export class CorvusClient {
         this.cookieJar.set(cookieName, match[1]);
       }
     }
-  }
-
-  private extractError(response: { json: unknown; text: string; status: number }): string {
-    if (response.json && typeof response.json === "object") {
-      const maybeError = (response.json as { error?: unknown }).error;
-      if (typeof maybeError === "string" && maybeError.trim().length > 0) {
-        return maybeError;
-      }
-    }
-
-    if (response.text?.trim()) {
-      return response.text.trim();
-    }
-
-    return `Corvus request failed with status ${response.status}`;
   }
 }

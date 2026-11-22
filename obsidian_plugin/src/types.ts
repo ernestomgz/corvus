@@ -5,6 +5,7 @@ export interface CorvusPluginSettings {
   username: string;
   password: string;
   rootDeckPath: string;
+  vaultSyncExclusions: string;
 }
 
 export const DEFAULT_SETTINGS: CorvusPluginSettings = {
@@ -12,6 +13,7 @@ export const DEFAULT_SETTINGS: CorvusPluginSettings = {
   username: "",
   password: "",
   rootDeckPath: "",
+  vaultSyncExclusions: "",
 };
 
 export interface NoteAttachment {
@@ -28,6 +30,17 @@ export interface NoteSyncSource {
   content: string;
   sourceHash: string;
   attachments: NoteAttachment[];
+}
+
+export interface NoteSyncAudit {
+  identified: number;
+  identities: { kind: "marker" | "anchor"; value: string }[];
+  found: number;
+  updates: number;
+  moves: number;
+  unchanged: number;
+  without_ids: number;
+  errors: string[];
 }
 
 export interface StudySetLinkSource {

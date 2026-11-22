@@ -20,7 +20,7 @@ def test_markdown_import_view(client, user_factory, deck_factory):
         follow=True,
     )
     assert response.status_code == 200
-    assert Card.objects.filter(deck=deck).exists()
+    assert Card.objects.filter(deck__parent=deck, deck__name='note.md').exists()
 
 
 def test_anki_import_view(client, user_factory, deck_factory, tmp_path):

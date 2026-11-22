@@ -125,7 +125,7 @@ That is clearer, easier to validate, and easier to evolve.
 - Extract and validate import IDs
 - Build card previews and diffs
 - Determine create vs update vs unchanged
-- Resolve the target deck path from root deck + note folder path
+- Resolve the target deck path from the root deck and the full relative Markdown path
 - Create missing child decks when needed
 - Resolve note-local media references against uploaded attachments
 - Rewrite media links to Corvus media URLs
@@ -167,7 +167,7 @@ The target deck path is:
 Rules:
 
 - the note file name does not create a deck
-- only folder segments under the note path are appended
+- append the note's folder segments and its filename, including `.md`
 - only the deck path needed for the current note is created
 - the configured root deck must already exist
 - Corvus may create missing child decks below that root

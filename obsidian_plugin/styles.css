@@ -106,3 +106,108 @@
   gap: 8px;
   margin-top: 16px;
 }
+
+.corvus-vault-sync-modal {
+  width: min(720px, 94vw);
+  --corvus-vault-columns: minmax(0, 1.5fr) 5.5rem minmax(0, 1fr);
+}
+
+.corvus-vault-sync-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.corvus-vault-sync-filters button {
+  background: transparent;
+  box-shadow: none;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.corvus-vault-sync-filters button[aria-pressed="true"] {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.corvus-vault-sync-header,
+.corvus-vault-sync-modal button.corvus-vault-sync-note {
+  display: grid;
+  grid-template-columns: var(--corvus-vault-columns);
+  align-items: start;
+  gap: 0.25rem 0.75rem;
+  padding: 0.65rem 0.5rem;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.corvus-vault-sync-header {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+}
+
+.corvus-vault-sync-modal button.corvus-vault-sync-note {
+  width: 100%;
+  height: auto;
+  min-height: 2.5rem;
+  margin: 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.corvus-vault-sync-filters button[aria-pressed="false"]:hover,
+.corvus-vault-sync-modal button.corvus-vault-sync-note:hover {
+  background: var(--background-modifier-hover);
+}
+
+.corvus-vault-sync-filters button:focus-visible,
+.corvus-vault-sync-modal button.corvus-vault-sync-note:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
+.corvus-vault-sync-path,
+.corvus-vault-sync-warnings {
+  display: grid;
+  min-width: 0;
+}
+
+.corvus-vault-sync-count,
+.corvus-vault-sync-header > :nth-child(2) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.corvus-vault-sync-folder,
+.corvus-vault-sync-status,
+.corvus-vault-sync-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.corvus-vault-sync-warnings {
+  grid-column: 1 / -1;
+  color: var(--text-warning);
+  font-size: var(--font-ui-small);
+}
+
+@media (max-width: 540px) {
+  .corvus-vault-sync-modal {
+    --corvus-vault-columns: minmax(0, 1fr) auto;
+  }
+
+  .corvus-vault-sync-header > :last-child {
+    display: none;
+  }
+
+  .corvus-vault-sync-status {
+    grid-column: 1 / -1;
+  }
+}

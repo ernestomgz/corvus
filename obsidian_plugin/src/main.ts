@@ -1,14 +1,17 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 
 import { CorvusClient } from "./corvus-client";
-import { collectCurrentNoteSource, collectCurrentStudySetSource } from "./note-source";
+import { collectCurrentNoteSource, collectCurrentStudySetSource, collectNoteSource } from "./note-source";
 import { SyncPreviewModal } from "./preview-modal";
 import { StudySetPreviewModal } from "./study-set-modal";
-import { DEFAULT_SETTINGS, type CorvusPluginSettings } from "./types";
+import { createVaultSyncExclusionMatcher } from "./vault-sync-exclusions";
+import { VaultSyncModal, type VaultSyncRow } from "./vault-sync-modal";
+import { DEFAULT_SETTINGS, type CorvusPluginSettings, type NoteSyncSource } from "./types";
 import { writeBackImportIds } from "./writeback";
 
 export default class CorvusSyncPlugin extends Plugin {
   settings: CorvusPluginSettings = { ...DEFAULT_SETTINGS };
+  private checkingVault = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -20,6 +23,14 @@ export default class CorvusSyncPlugin extends Plugin {
       name: "Sync Current Note",
       callback: async () => {
         await this.syncCurrentNote();
+      },
+    });
+
+    this.addCommand({
+      id: "check-vault-sync",
+      name: "Check Vault Sync",
+      callback: async () => {
+        await this.checkVaultSync();
       },
     });
 
@@ -38,6 +49,45 @@ export default class CorvusSyncPlugin extends Plugin {
         await this.testConnection();
       },
     });
+  }
+
+  async checkVaultSync(): Promise<void> {
+    if (this.checkingVault) return;
+
+    this.checkingVault = true;
+    const progress = new Notice("Connecting to Corvus…", 0);
+    try {
+      this.assertConfigured();
+      const client = new CorvusClient(this.settings);
+      await client.login();
+
+      const isExcluded = createVaultSyncExclusionMatcher(this.settings.vaultSyncExclusions);
+      const notes = this.app.vault.getMarkdownFiles().filter((file) => !isExcluded(file.path));
+      const rows: VaultSyncRow[] = [];
+      for (const [index, file] of notes.entries()) {
+        progress.setMessage(`Checking Corvus sync · ${index + 1} of ${notes.length} notes`);
+        let source: NoteSyncSource;
+        try {
+          const content = await this.app.vault.cachedRead(file);
+          // The server parser decides whether these markers actually produce cards.
+          if (!/#(?:long-)?card(?:-reverse)?(?=\s|$)/i.test(content)) continue;
+          source = await collectNoteSource(this.app, file, content);
+        } catch (error) {
+          rows.push({ file, error: this.errorMessage(error, "Could not read note") });
+          continue;
+        }
+        const audit = await client.auditNote(source);
+        if (audit.identified || audit.without_ids || audit.errors.length) rows.push({ file, audit });
+      }
+      new VaultSyncModal(this.app, rows).open();
+    } catch (error) {
+      const message = this.errorMessage(error, "Corvus vault check failed");
+      console.error(message);
+      new Notice(message);
+    } finally {
+      progress.hide();
+      this.checkingVault = false;
+    }
   }
 
   async loadSettings(): Promise<void> {
@@ -214,6 +264,20 @@ class CorvusSyncSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
       );
+
+    new Setting(containerEl)
+      .setName("Vault sync exclusions")
+      .setDesc("One path from the vault root per line. Include .md for notes. Folders include subfolders. Applies to Check Vault Sync.")
+      .addTextArea((text) => {
+        text.inputEl.rows = 4;
+        text
+          .setPlaceholder("Templates/\nStudy/Card Template.md")
+          .setValue(this.plugin.settings.vaultSyncExclusions)
+          .onChange(async (value) => {
+            this.plugin.settings.vaultSyncExclusions = value;
+            await this.plugin.saveSettings();
+          });
+      });
 
     new Setting(containerEl)
       .setName("Test Connection")

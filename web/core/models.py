@@ -29,7 +29,9 @@ class Deck(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=['user', 'parent', 'name'], name='unique_deck_per_parent'),
+            models.UniqueConstraint(
+                fields=['user', 'parent', 'name'], name='unique_deck_per_parent', nulls_distinct=False,
+            ),
         ]
         indexes = [
             models.Index(fields=['user', 'parent']),

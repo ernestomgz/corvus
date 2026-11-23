@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import html
 from functools import lru_cache
 
 import bleach
@@ -25,7 +24,7 @@ _ALLOWED_TAGS = sorted(
         'p', 'pre', 'code', 'span', 'div', 'img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
         'ul', 'ol', 'li', 'blockquote', 'hr', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
         'em', 'strong', 'a', 'br', 'sup', 'sub', 'figure', 'figcaption', 'audio', 'source',
-        'script', 'svg', 'path', 'g', 'line', 'rect', 'circle', 'ellipse', 'polyline', 'polygon',
+        'svg', 'path', 'g', 'line', 'rect', 'circle', 'ellipse', 'polyline', 'polygon',
         'text', 'tspan', 'defs', 'marker', 'use', 'clipPath', 'symbol', 'title', 'desc', 'style',
     }
 )
@@ -40,7 +39,6 @@ _ALLOWED_ATTRIBUTES = {
     'pre': ['class'],
     'audio': ['src', 'controls'],
     'source': ['src', 'type'],
-    'script': ['type'],
     'svg': ['class', 'style', 'width', 'height', 'viewBox', 'xmlns', 'fill', 'stroke', 'stroke-width'],
     'g': ['class', 'style', 'fill', 'stroke', 'stroke-width', 'transform'],
     'path': ['class', 'style', 'd', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'marker-start', 'marker-end'],
@@ -83,9 +81,8 @@ _BLOCK_PLACEHOLDER_PARA_RE = re.compile(
     re.IGNORECASE,
 )
 _MATH_CLASS_RE = re.compile(r'class=["\'][^"\']*\bmath\b', re.IGNORECASE)
-_SCRIPT_TAG_RE = re.compile(r'<script(?P<attrs>[^>]*)>(?P<body>.*?)</script>', re.IGNORECASE | re.DOTALL)
 _TIKZ_CODE_RE = re.compile(
-    r'<pre><code class="(?P<class>[^"]*\blanguage-(?P<lang>tikz|latex)[^"]*)">(?P<body>.*?)</code></pre>',
+    r'<pre><code class="language-(?P<lang>tikz|latex)">(?P<body>.*?)</code></pre>',
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -192,25 +189,29 @@ def _normalise_classes(existing: list[str], required: list[str]) -> list[str]:
     return merged
 
 
-def _strip_unsafe_scripts(html_value: str) -> str:
+class _DropScripts:
+    def __init__(self, source):
+        self.source = source
+
+    def __iter__(self):
+        depth = 0
+        for token in self.source:
+            if token.get('name') == 'script':
+                if token['type'] == 'StartTag':
+                    depth += 1
+                elif token['type'] == 'EndTag':
+                    depth = max(0, depth - 1)
+                continue
+            if not depth:
+                yield token
+
+
+def _mark_legacy_tikz_blocks(html_value: str) -> str:
     def repl(match: re.Match[str]) -> str:
-        attrs = (match.group('attrs') or '').lower()
-        if 'text/tikz' in attrs:
-            return match.group(0)
-        return ''
-
-    return _SCRIPT_TAG_RE.sub(repl, html_value)
-
-
-def _promote_tikz_blocks(html_value: str) -> str:
-    def repl(match: re.Match[str]) -> str:
-        lang = (match.group('lang') or '').lower()
-        raw_body = match.group('body') or ''
-        body_text = html.unescape(raw_body)
-        if '\\begin{tikzpicture' not in body_text and '\\begin{circuitikz' not in body_text:
-            if lang != 'tikz':
-                return match.group(0)
-        return f'<script type="text/tikz">\n{body_text}\n</script>'
+        body = match.group('body')
+        if match.group('lang').lower() == 'tikz' or '\\begin{tikzpicture' in body or '\\begin{circuitikz' in body:
+            return match.group(0).replace('<pre>', '<pre data-corvus-tikz>', 1)
+        return match.group(0)
 
     return _TIKZ_CODE_RE.sub(repl, html_value)
 
@@ -271,8 +272,9 @@ def _clean_math_body(body: str) -> str:
     return body.strip()
 
 
-def _extract_math_segments(value: str) -> tuple[str, list[_MathSegment]]:
-    segments: list[_MathSegment] = []
+def _extract_math_segments(value: str, segments: list[_MathSegment] | None = None) -> tuple[str, list[_MathSegment]]:
+    if segments is None:
+        segments = []
 
     def store(kind: str, body: str) -> str:
         placeholder = _make_placeholder(len(segments))
@@ -326,10 +328,25 @@ def _restore_placeholders(html: str, segments: list[_MathSegment]) -> str:
 
 @lru_cache(maxsize=256)
 def _render_markdown_cached(raw: str) -> str:
-    prepared = _normalise_legacy_math(raw)
-    prepared = _normalise_wiki_links(prepared)
-    placeholder_text, segments = _extract_math_segments(prepared)
-    rendered = _markdown.render(placeholder_text)
+    segments: list[_MathSegment] = []
+
+    def prepare(text: str) -> str:
+        text = _normalise_wiki_links(_normalise_legacy_math(text))
+        return _extract_math_segments(text, segments)[0]
+
+    # Keep math delimiters in code blocks literal, including TeX consumed by TikZJax.
+    raw = raw.replace('\r\n', '\n').replace('\r', '\n')
+    lines = raw.splitlines(keepends=True)
+    parts = []
+    start = 0
+    for token in _markdown.parse(raw):
+        if token.type in {'fence', 'code_block'} and token.map is not None:
+            code_start, code_end = token.map
+            parts.append(prepare(''.join(lines[start:code_start])))
+            parts.append(''.join(lines[code_start:code_end]))
+            start = code_end
+    parts.append(prepare(''.join(lines[start:])))
+    rendered = _markdown.render(''.join(parts))
     if segments:
         rendered = _restore_block_paragraphs(rendered, segments)
         rendered = _restore_placeholders(rendered, segments)
@@ -357,24 +374,15 @@ def render_to_html(content: str | None) -> str:
     if not content:
         return ''
 
-    # 1. ALWAYS render through Markdown first. 
-    # This identifies ```bash blocks correctly and escapes the < and > symbols.
     html_value = _render_markdown_cached(content)
-
-    # 2. Promote specific blocks (like TikZ) that were safely parsed as code
-    html_value = _promote_tikz_blocks(html_value)
-
-    # 3. Sanitize the HTML. 
-    # Bleach will now see the shell redirect as "&lt;", which is safe.
-    cleaned = bleach.clean(
-        html_value,
-        tags=_ALLOWED_TAGS,
+    # Keep script elements in the parsed token stream solely so the filter can
+    # discard their contents as well as the tags before HTML is serialized.
+    cleaner = bleach.Cleaner(
+        tags=[*_ALLOWED_TAGS, 'script'],
         attributes=_ALLOWED_ATTRIBUTES,
         protocols=_ALLOWED_PROTOCOLS,
         strip=True,
+        filters=[_DropScripts],
     )
-
-    # 4. Only ensure MathJax markup for things the parser ALREADY identified as math.
-    cleaned = _ensure_mathjax_markup(cleaned)
-    
-    return cleaned
+    cleaned = cleaner.clean(html_value)
+    return _mark_legacy_tikz_blocks(_ensure_mathjax_markup(cleaned))

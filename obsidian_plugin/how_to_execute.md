@@ -97,6 +97,12 @@ Corvus Sync: Sync Current Note
 
 If Corvus creates new cards without source IDs, the plugin writes those IDs back into the note.
 
+### TikZ diagrams
+
+Enable the **TikZJax** Obsidian community plugin to sync diagrams from backtick fences marked `tikz`. Corvus Sync exports the completed diagram as a PNG attachment. The original block stays in the note. An edit to the block can mark the card for update even when the resulting image looks the same.
+
+If a block fails to render, Corvus Sync reports its note and line number. Open the note in Reading view and wait for the diagram before retrying. **Check Vault Sync** reports the failure on that note and continues checking the other notes.
+
 ## Check Vault Sync
 
 Run **Corvus Sync: Check Vault Sync** from the command palette to see which notes need attention. Each row shows counts for matched IDs, updates, deck moves, and cards without IDs. Click a row to open the note, then run **Sync Current Note** if you want to apply changes.

@@ -29,6 +29,7 @@ export interface NoteSyncSource {
   path: string;
   content: string;
   sourceHash: string;
+  originalLineNumbers?: number[];
   attachments: NoteAttachment[];
 }
 

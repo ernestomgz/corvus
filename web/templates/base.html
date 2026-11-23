@@ -67,12 +67,20 @@
         }
         if (!window.triggerTikzJax) {
             window.triggerTikzJax = () => {
+                for (const code of document.querySelectorAll('pre[data-corvus-tikz] > code')) {
+                    const script = document.createElement('script');
+                    script.type = 'text/tikz';
+                    script.textContent = code.textContent;
+                    code.parentElement.replaceWith(script);
+                }
                 if (window.tikzjax && typeof window.tikzjax.process === 'function') {
                     window.tikzjax.process(document.body);
                 }
             };
             document.addEventListener('DOMContentLoaded', window.triggerTikzJax);
             document.addEventListener('htmx:afterSwap', window.triggerTikzJax);
+            // Prepare the initial diagrams before the deferred TikZJax script scans the page.
+            window.triggerTikzJax();
         }
     </script>
 </body>

@@ -29,11 +29,12 @@ export async function writeBackImportIds(
     if (!previewCard || !previewCard.will_write_back_id || !applied.import_id) {
       continue;
     }
-    if (typeof applied.marker_line !== "number") {
+    // Preview lines were translated back to the vault note before it was displayed.
+    if (typeof previewCard.marker_line !== "number") {
       continue;
     }
-    const group = grouped.get(applied.marker_line) ?? {
-      line: applied.marker_line,
+    const group = grouped.get(previewCard.marker_line) ?? {
+      line: previewCard.marker_line,
       cardId: null,
       reverseId: null,
     };
@@ -42,7 +43,7 @@ export async function writeBackImportIds(
     } else {
       group.cardId = applied.import_id;
     }
-    grouped.set(applied.marker_line, group);
+    grouped.set(group.line, group);
   }
 
   if (grouped.size === 0) {
@@ -66,7 +67,7 @@ export async function writeBackImportIds(
   }
 
   if (writes > 0) {
-    await app.vault.modify(file, lines.join("\n"));
+    await app.vault.modify(file, lines.join(currentContent.includes("\r\n") ? "\r\n" : "\n"));
   }
 
   return writes;

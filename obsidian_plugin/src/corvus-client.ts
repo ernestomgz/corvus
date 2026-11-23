@@ -38,7 +38,14 @@ export class CorvusClient {
   }
 
   async createPreview(source: NoteSyncSource): Promise<PreviewSession> {
-    return await this.sendNote("/api/v1/obsidian/preview", source);
+    const preview = await this.sendNote<PreviewSession>("/api/v1/obsidian/preview", source);
+    const lineNumbers = source.originalLineNumbers;
+    if (lineNumbers) {
+      for (const card of preview.cards) {
+        card.marker_line = lineNumbers[card.marker_line - 1] ?? card.marker_line;
+      }
+    }
+    return preview;
   }
 
   async auditNote(source: NoteSyncSource): Promise<NoteSyncAudit> {

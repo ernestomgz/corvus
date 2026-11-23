@@ -1,6 +1,8 @@
 import { App, TFile, normalizePath } from "obsidian";
 
 import { sha256Hex } from "./hash";
+import { prepareTikzAttachments } from "./tikz-attachments";
+import { renderTikzImage } from "./tikz-renderer";
 import type {
   NoteAttachment,
   NoteSyncSource,
@@ -28,15 +30,29 @@ export async function collectCurrentNoteSource(app: App): Promise<NoteSyncSource
 }
 
 export async function collectNoteSource(app: App, file: TFile, originalContent: string): Promise<NoteSyncSource> {
+  const tikz = await prepareTikzAttachments(originalContent, file.path, (markdown, digest) =>
+    renderTikzImage(app, markdown, file.path, digest),
+  );
   const attachmentFiles = new Map<string, TFile>();
-  const content = collectAttachmentsAndRewriteContent(app, file, originalContent, attachmentFiles);
+  const content = collectAttachmentsAndRewriteContent(app, file, tikz.content, attachmentFiles, tikz.images);
   const attachments = await readAttachments(app, attachmentFiles);
+  for (const [path, data] of tikz.images) {
+    if (attachmentFiles.has(path)) throw new Error(`Attachment path conflicts with a rendered TikZ image: ${path}`);
+    attachments.push({
+      field: `attachment_${attachments.length}`,
+      path,
+      fileName: path.slice(path.lastIndexOf("/") + 1),
+      contentType: "image/png",
+      data,
+    });
+  }
 
   return {
     file,
     path: file.path,
     content,
     sourceHash: await sha256Hex(originalContent),
+    originalLineNumbers: tikz.originalLineNumbers,
     attachments,
   };
 }
@@ -196,6 +212,7 @@ function collectAttachmentsAndRewriteContent(
   noteFile: TFile,
   content: string,
   attachmentFiles: Map<string, TFile>,
+  generatedImages: Map<string, ArrayBuffer>,
 ): string {
   const rewrites: TextRewrite[] = [];
 
@@ -217,6 +234,7 @@ function collectAttachmentsAndRewriteContent(
   for (const match of content.matchAll(MARKDOWN_IMAGE_RE)) {
     const originalTarget = match[1] ?? "";
     const rawTarget = stripMarkdownTarget(originalTarget);
+    if (generatedImages.has(rawTarget)) continue;
     const attachment = resolveRelativeAttachment(app, noteFile, rawTarget);
     if (attachment) {
       attachmentFiles.set(attachment.path, attachment);

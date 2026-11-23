@@ -11,7 +11,7 @@ export class SyncPreviewModal extends Modal {
 
   private readonly markdownChildren: MarkdownRenderChild[] = [];
 
-  constructor(app: Modal["app"], private readonly preview: PreviewSession) {
+  constructor(app: Modal["app"], private readonly preview: PreviewSession, private readonly serverUrl: string) {
     super(app);
     this.modalEl.addClass("corvus-preview-modal");
     for (const card of preview.cards) {
@@ -221,7 +221,11 @@ export class SyncPreviewModal extends Modal {
     const bodyEl = sectionEl.createDiv({ cls });
     const renderChild = new MarkdownRenderChild(bodyEl);
     this.markdownChildren.push(renderChild);
-    void MarkdownRenderer.render(this.app, markdown, bodyEl, "", renderChild);
+    const mediaBase = this.serverUrl.replace(/\/+$/, "");
+    const withServerMedia = markdown.replace(/(!\[[^\]\r\n]*\]\()(\/media\/\d+\/[a-f\d]{40}\.[\w-]+)(?=\))/gi,
+      (_, start: string, path: string) => `${start}${mediaBase}${path}`,
+    );
+    void MarkdownRenderer.render(this.app, withServerMedia, bodyEl, "", renderChild);
   }
 
   private actionLabel(card: PreviewCard): string {

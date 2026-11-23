@@ -73,7 +73,7 @@ export default class CorvusSyncPlugin extends Plugin {
           if (!/#(?:long-)?card(?:-reverse)?(?=\s|$)/i.test(content)) continue;
           source = await collectNoteSource(this.app, file, content);
         } catch (error) {
-          rows.push({ file, error: this.errorMessage(error, "Could not read note") });
+          rows.push({ file, error: this.errorMessage(error, "Could not prepare note") });
           continue;
         }
         const audit = await client.auditNote(source);
@@ -124,7 +124,7 @@ export default class CorvusSyncPlugin extends Plugin {
       const preview = await client.createPreview(source);
       previewSessionId = preview.session_id;
 
-      const decisions = await new SyncPreviewModal(this.app, preview).openAndWait();
+      const decisions = await new SyncPreviewModal(this.app, preview, this.settings.baseUrl).openAndWait();
       if (!decisions) {
         await client.cancelPreview(previewSessionId);
         new Notice("Corvus sync cancelled.");

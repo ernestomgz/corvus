@@ -109,6 +109,53 @@ def test_obsidian_preview_create_and_fetch_with_media(api_client, user_factory, 
     assert detail_data['cards'][0]['target_deck_path'] == 'STEM/Math/Functions/exponential.md'
 
 
+def test_obsidian_tikz_attachment_source_change_is_visible_to_audit(api_client, deck_factory, settings):
+    root = deck_factory(name='STEM')
+    api_client.force_login(root.user)
+
+    def payload(source_digest, image=b'same exported PNG bytes'):
+        filename = f'tikz-{source_digest}.png'
+        path = f'__corvus_tikz__/{filename}'
+        data = _preview_payload(
+            source_path='Circuits/Transistor.md', root_deck_path='STEM', source_hash=source_digest,
+            content=f'Circuit\n#card id:a1\n![TikZ diagram]({path})\nExplanation after the diagram',
+        )
+        data['attachment_manifest'] = json.dumps([{'field': 'attachment_0', 'path': path}])
+        data['attachment_0'] = SimpleUploadedFile(filename, image, content_type='image/png')
+        return data
+
+    original_digest = 'a' * 64
+    edited_digest = 'b' * 64
+    preview = api_client.post('/api/v1/obsidian/preview', data=payload(original_digest))
+    assert preview.status_code == 201
+    session_id = preview.json()['session_id']
+    applied = api_client.post(
+        f'/api/v1/obsidian/preview/{session_id}/apply',
+        data=json.dumps({'source_hash': original_digest, 'decisions': [{'index': 0, 'action': 'apply'}]}),
+        content_type='application/json',
+    )
+    assert applied.status_code == 200
+    card = Card.objects.get(user=root.user, import_id='a1')
+    assert card.back_md.startswith(f'![TikZ diagram]({settings.MEDIA_URL}')
+    assert card.back_md.endswith('Explanation after the diagram')
+    assert card.media[0]['name'] == f'tikz-{original_digest}.png'
+    media_dir = settings.MEDIA_ROOT / str(root.user_id)
+    existing_files = set(media_dir.iterdir())
+
+    unchanged = api_client.post('/api/v1/obsidian/audit-note', data=payload(original_digest))
+    assert unchanged.json()['unchanged'] == 1
+
+    for edited in [payload(edited_digest), payload(original_digest, b'different image bytes')]:
+        audit = api_client.post('/api/v1/obsidian/audit-note', data=edited)
+        assert audit.status_code == 200
+        assert audit.json()['updates'] == 1
+        assert audit.json()['moves'] == 0
+
+    assert set(media_dir.iterdir()) == existing_files
+    card.refresh_from_db()
+    assert card.media[0]['name'] == f'tikz-{original_digest}.png'
+
+
 def test_obsidian_preview_apply_creates_cards_and_nested_decks(api_client, user_factory, deck_factory):
     user = user_factory()
     root = deck_factory(user=user, name='STEM', parent=None)

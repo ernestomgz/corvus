@@ -161,13 +161,8 @@ export default class CorvusSyncPlugin extends Plugin {
 
       const source = await collectCurrentStudySetSource(this.app);
       const preview = await client.previewStudySet(source);
-      if (preview.missing.length > 0) {
-        new Notice("Some linked notes have not been imported into Corvus. Review the preview.");
-      }
-
-      const confirmed = await new StudySetPreviewModal(this.app, preview).openAndWait();
+      const confirmed = await new StudySetPreviewModal(this.app, preview, source.errors).openAndWait();
       if (!confirmed) {
-        new Notice("Corvus study preset cancelled.");
         return;
       }
 

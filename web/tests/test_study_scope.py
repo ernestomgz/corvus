@@ -1,7 +1,7 @@
 import pytest
 from django.urls import reverse
 
-from core.models import StudySet
+from core.models import NoteSource, StudySet
 from tests.factories import CardFactory, DeckFactory, StudySetFactory, UserFactory
 
 pytestmark = pytest.mark.django_db
@@ -89,3 +89,41 @@ def test_custom_study_set_source_paths_can_be_limited_to_root_deck():
 
     assert matching.id in card_ids
     assert outside_root.id not in card_ids
+
+
+def test_preset_note_type_keeps_review_actions_in_the_selected_source_scope(client, deck_factory, card_factory):
+    root = deck_factory(name='STEM')
+    user = root.user
+    questions = card_factory(user=user, deck=root, source_path='BJT.md', front_md='Question front')
+    exercise = card_factory(user=user, deck=root, source_path='Exercises.md', front_md='Exercise front')
+    exam = card_factory(user=user, deck=root, source_path='Exam.md', front_md='Exam front')
+    outside = deck_factory(user=user, name='Outside')
+    card_factory(user=user, deck=outside, source_path='Exercises.md', front_md='Outside root')
+    for path, kind in [('Exercises.md', 'exercises'), ('Exam.md', 'exam-practice')]:
+        NoteSource.objects.create(user=user, source_root_deck=root, source_path=path, note_type=kind)
+    preset = StudySetFactory(user=user, kind=StudySet.KIND_CUSTOM, source_root_deck=root, source_paths=[
+        questions.source_path, exercise.source_path, exam.source_path,
+    ])
+    client.force_login(user)
+    deck_page = client.get(reverse('decks:list')).content.decode()
+    assert f'?study_set_id={preset.id}"' in deck_page
+    assert 'Questions only' in deck_page
+    assert 'Exercises only' in deck_page
+    assert 'Exam practice only' in deck_page
+
+    scope = {'study_set_id': preset.id, 'note_type': 'exercises'}
+    page = client.get(reverse('review:study'), scope).content.decode()
+    assert 'Exercises only' in page and 'note_type=exercises' in page
+    front = client.get(reverse('review:next'), scope).content.decode()
+    assert str(exercise.id) in front and str(questions.id) not in front
+    assert 'name="note_type" value="exercises"' in front
+
+    wrong = client.post(reverse('review:grade'), {**scope, 'card_id': questions.id, 'rating': 2})
+    assert wrong.status_code == 404
+    reveal = client.post(reverse('review:reveal'), {**scope, 'card_id': exercise.id})
+    assert b'name="note_type" value="exercises"' in reveal.content
+    graded = client.post(reverse('review:grade'), {**scope, 'card_id': exercise.id, 'rating': 2})
+    assert graded.status_code == 200
+    assert b'note_type=exercises' in graded.content
+    undone = client.post(reverse('review:undo'), scope)
+    assert str(exercise.id).encode() in undone.content

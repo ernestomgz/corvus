@@ -4,7 +4,7 @@ import pytest
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from core.models import Card, Deck, ImportSession
+from core.models import Card, Deck, ImportSession, NoteSource
 
 pytestmark = pytest.mark.django_db
 
@@ -21,6 +21,43 @@ def _preview_payload(*, source_path: str, content: str, root_deck_path: str, sou
 def test_obsidian_preview_requires_auth(api_client):
     response = api_client.post('/api/v1/obsidian/preview', data={})
     assert response.status_code == 401
+
+
+def test_obsidian_sync_applies_explicit_note_type_even_when_cards_are_unchanged(api_client, deck_factory, card_factory):
+    root = deck_factory(name='STEM')
+    note_deck = deck_factory(user=root.user, parent=root, name='Exam.md')
+    card = card_factory(
+        user=root.user, deck=note_deck, source_path='Exam.md', front_md='Question', back_md='Answer', import_id='a1',
+    )
+    state_id = card.scheduling_state.pk
+    api_client.force_login(root.user)
+    payload = _preview_payload(
+        source_path='Exam.md', root_deck_path='STEM', source_hash='exam-hash',
+        content='---\nnote-type: Exam practice\n---\nQuestion\n#card id:a1\nAnswer',
+    )
+    audit = api_client.post('/api/v1/obsidian/audit-note', data=payload)
+    assert audit.status_code == 200
+    assert audit.json()['note_type_change'] == 'exam-practice'
+    assert audit.json()['updates'] == 0
+    assert not NoteSource.objects.exists()
+
+    preview = api_client.post('/api/v1/obsidian/preview', data=payload)
+    assert preview.status_code == 201
+    session = preview.json()
+    assert session['note_type_change'] == 'exam-practice'
+    assert session['cards'][0]['unchanged'] is True
+    assert not NoteSource.objects.exists()
+
+    apply = api_client.post(
+        f"/api/v1/obsidian/preview/{session['session_id']}/apply",
+        data=json.dumps({'source_hash': 'exam-hash', 'decisions': [{'index': 0, 'action': 'skip'}]}),
+        content_type='application/json',
+    )
+    assert apply.status_code == 200
+    source = NoteSource.objects.get(user=root.user, source_root_deck=root, source_path='Exam.md')
+    assert (source.note_type, source.type_priority) == ('exam-practice', NoteSource.EXPLICIT)
+    assert card.scheduling_state.pk == state_id
+    assert 'note_type_change' not in api_client.post('/api/v1/obsidian/audit-note', data=payload).json()
 
 
 def test_obsidian_vault_audit_reports_changes_without_writing(

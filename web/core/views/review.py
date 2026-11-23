@@ -20,6 +20,7 @@ from ..services.review import (
     grade_card_for_user,
 )
 from ..services.study_sets import fetch_study_sets_with_summaries
+from ..services.note_sources import normalise_note_type
 
 REVIEW_HISTORY_SESSION_KEY = 'review_history'
 REVIEW_HISTORY_SCOPE_KEY = 'review_history_scope'
@@ -115,6 +116,7 @@ def _resolve_scope(request: HttpRequest):
     deck_id = request.POST.get('deck_id') or request.GET.get('deck_id')
     study_set_id = request.POST.get('study_set_id') or request.GET.get('study_set_id')
     tag_value = request.POST.get('tag') or request.GET.get('tag')
+    note_type = request.POST.get('note_type') or request.GET.get('note_type')
     pull_ahead = (request.POST.get('pull_ahead') or request.GET.get('pull_ahead')) == '1'
     deck = None
     study_set = None
@@ -124,7 +126,7 @@ def _resolve_scope(request: HttpRequest):
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
             raise Http404('Study set not found') from exc
         try:
-            study_set = StudySet.objects.select_related('deck').get(id=study_set_pk, user=request.user)
+            study_set = StudySet.objects.select_related('deck', 'source_root_deck').get(id=study_set_pk, user=request.user)
         except StudySet.DoesNotExist as exc:  # pragma: no cover
             raise Http404('Study set not found') from exc
     if deck_id:
@@ -136,8 +138,17 @@ def _resolve_scope(request: HttpRequest):
             deck = Deck.objects.get(id=deck_pk, user=request.user)
         except Deck.DoesNotExist as exc:  # pragma: no cover
             raise Http404('Deck not found') from exc
+    if note_type:
+        if not study_set or study_set.kind != StudySet.KIND_CUSTOM or not study_set.source_root_deck_id:
+            raise Http404('Note types require a source-based study preset.')
+        try:
+            note_type = normalise_note_type(note_type)
+        except ValueError as exc:
+            raise Http404('Invalid note type.') from exc
     if study_set is not None:
-        scope = StudyScope.from_study_set(study_set)
+        scope = StudyScope.from_study_set(study_set, note_type=note_type)
+        if note_type and request.POST.get('card_id'):
+            get_object_or_404(scope.note_type_cards, pk=request.POST['card_id'])
         return scope.deck_target, study_set, scope, pull_ahead
     if deck is not None:
         scope = StudyScope.from_deck(deck)

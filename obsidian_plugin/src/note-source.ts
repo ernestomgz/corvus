@@ -1,4 +1,4 @@
-import { App, TFile, normalizePath } from "obsidian";
+import { App, TFile, normalizePath, parseYaml } from "obsidian";
 
 import { sha256Hex } from "./hash";
 import { prepareTikzAttachments } from "./tikz-attachments";
@@ -61,9 +61,9 @@ export async function collectCurrentStudySetSource(app: App): Promise<StudySetSo
   const file = getActiveMarkdownFile(app);
   const content = await app.vault.cachedRead(file);
   const sourceHash = await sha256Hex(content);
-  const links = await collectLinkedMarkdownNotes(app, file);
+  const { links, errors } = await collectLinkedMarkdownNotes(app, file);
   if (links.length === 0) {
-    throw new Error("The current note does not contain any markdown note links for a Corvus study preset.");
+    throw new Error(errors[0] ?? "The current note does not contain any markdown note links for a Corvus study preset.");
   }
 
   return {
@@ -72,6 +72,7 @@ export async function collectCurrentStudySetSource(app: App): Promise<StudySetSo
     path: file.path,
     sourceHash,
     links,
+    errors,
   };
 }
 
@@ -83,12 +84,60 @@ function getActiveMarkdownFile(app: App): TFile {
   return file;
 }
 
-async function collectLinkedMarkdownNotes(app: App, noteFile: TFile): Promise<StudySetLinkSource[]> {
-  const metadata = app.metadataCache.getFileCache(noteFile);
-  const links = metadata?.links ?? [];
-  const linkedNotes = new Map<string, StudySetLinkSource>();
+const COMPANION_TYPES = { "questions-source": "questions", "exercises-source": "exercises" } as const;
 
-  for (const link of links) {
+async function collectLinkedMarkdownNotes(app: App, noteFile: TFile): Promise<{ links: StudySetLinkSource[]; errors: string[] }> {
+  const metadata = app.metadataCache.getFileCache(noteFile);
+  const directLinks = metadata?.links ?? [];
+  const linkedNotes = new Map<string, StudySetLinkSource>();
+  const frontmatterByPath = new Map<string, Record<string, unknown>>();
+  const errors = new Set<string>();
+
+  async function readFrontmatter(file: TFile): Promise<Record<string, unknown>> {
+    const cached = frontmatterByPath.get(file.path);
+    if (cached) return cached;
+    const content = await app.vault.cachedRead(file);
+    const lines = content.split(/\r?\n/);
+    const end = lines[0]?.trim() === "---"
+      ? lines.findIndex((line, index) => index > 0 && ["---", "..."].includes(line.trim()))
+      : -1;
+    let fields = {};
+    if (end > 0) {
+      try {
+        // Older examples used quoted wiki links without a space after the colon.
+        const yaml = lines.slice(1, end).join("\n").replace(/^(questions-source|exercises-source):(?=["'\[])/gm, "$1: ");
+        const parsed = parseYaml(yaml);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) fields = parsed;
+      } catch {
+        errors.add(`${file.path}: Invalid YAML frontmatter.`);
+      }
+    }
+    frontmatterByPath.set(file.path, fields);
+    return fields;
+  }
+
+  async function addSource(file: TFile, linkText: string, inferredType?: string): Promise<void> {
+    const explicit = (await readFrontmatter(file))["note-type"];
+    let noteType = inferredType;
+    const noteTypeExplicit = explicit != null && explicit !== "";
+    if (noteTypeExplicit) {
+      const slug = typeof explicit === "string" ? explicit.trim().toLowerCase().replace(/\s+/g, "-") : "";
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length > 64) {
+        errors.add(`${file.path} → note-type: Use letters, numbers, spaces, or hyphens.`);
+      } else {
+        noteType = slug;
+      }
+    }
+    const existing = linkedNotes.get(file.path);
+    if (!existing || (noteType && !existing.noteType)) {
+      linkedNotes.set(file.path, { linkText, obsidianPath: file.path, noteType, noteTypeExplicit });
+    } else if (noteType && existing.noteType !== noteType && !noteTypeExplicit) {
+      errors.add(`${file.path} is linked as both questions and exercises. Set note-type on that note to choose its type.`);
+    }
+  }
+
+  const expanded = new Set<string>();
+  for (const link of directLinks) {
     const linkText = link.link.trim();
     const original = (link.original ?? "").trim();
     if (!linkText || !original.startsWith("[[")) {
@@ -102,109 +151,46 @@ async function collectLinkedMarkdownNotes(app: App, noteFile: TFile): Promise<St
     if (!(linkedFile instanceof TFile) || linkedFile.extension !== "md") {
       continue;
     }
-    addStudySetLink(linkedNotes, linkedFile, linkText);
-    await addQuestionsSourceLinks(app, linkedFile, linkedNotes);
-  }
-
-  return Array.from(linkedNotes.values());
-}
-
-async function addQuestionsSourceLinks(
-  app: App,
-  sourceNote: TFile,
-  linkedNotes: Map<string, StudySetLinkSource>,
-): Promise<void> {
-  const content = await app.vault.cachedRead(sourceNote);
-  for (const linkText of extractQuestionsSourceLinks(app, sourceNote, content)) {
-    const linkedFile = app.metadataCache.getFirstLinkpathDest(linkText, sourceNote.path);
-    if (!(linkedFile instanceof TFile) || linkedFile.extension !== "md") {
-      throw new Error(`Question source note not found: ${linkText}`);
+    await addSource(linkedFile, linkText);
+    if (expanded.has(linkedFile.path)) continue;
+    expanded.add(linkedFile.path);
+    const fields = await readFrontmatter(linkedFile);
+    for (const [field, noteType] of Object.entries(COMPANION_TYPES)) {
+      const context = `${linkedFile.path} → ${field}`;
+      for (const target of readCompanionLinks(fields[field], context, errors)) {
+        const companion = app.metadataCache.getFirstLinkpathDest(target, linkedFile.path);
+        if (!(companion instanceof TFile) || companion.extension !== "md") {
+          errors.add(`${context}: Link not found: [[${target}]].`);
+          continue;
+        }
+        await addSource(companion, target, noteType);
+      }
     }
-    addStudySetLink(linkedNotes, linkedFile, linkText);
   }
+
+  return { links: [...linkedNotes.values()], errors: [...errors] };
 }
 
-function addStudySetLink(
-  linkedNotes: Map<string, StudySetLinkSource>,
-  linkedFile: TFile,
-  linkText: string,
-): void {
-  if (!linkedNotes.has(linkedFile.path)) {
-    linkedNotes.set(linkedFile.path, {
-      linkText,
-      obsidianPath: linkedFile.path,
-    });
-  }
-}
-
-function extractQuestionsSourceLinks(app: App, noteFile: TFile, content: string): string[] {
-  const metadata = app.metadataCache.getFileCache(noteFile);
-  const rawValue = metadata?.frontmatter?.["questions-source"];
-  const values = rawValue === undefined || rawValue === null
-    ? parseQuestionsSourceFromFrontmatter(content)
-    : Array.isArray(rawValue)
-      ? rawValue
-      : [rawValue];
-
-  if (values.length === 0) {
-    return [];
-  }
-
+function readCompanionLinks(value: unknown, context: string, errors: Set<string>): string[] {
+  if (value == null) return [];
   const links: string[] = [];
-  for (const value of values) {
-    const text = String(value);
-    const matches = Array.from(text.matchAll(/\[\[([^\]]+)\]\]/g));
-    if (matches.length === 0 && text.trim()) {
-      throw new Error("questions-source must contain Obsidian wiki link(s).");
+  for (const entry of Array.isArray(value) ? value : [value]) {
+    if (typeof entry !== "string") {
+      errors.add(`${context}: Use Obsidian wiki links.`);
+      continue;
     }
-    for (const match of matches) {
-      const rawLink = match[1] ?? "";
-      if (rawLink.includes("#") || rawLink.includes("^")) {
-        throw new Error("questions-source links must point to markdown notes, not blocks.");
+    const matches = [...entry.matchAll(/\[\[([^\]]+)\]\]/g)];
+    if (!matches.length && entry.trim()) errors.add(`${context}: Use Obsidian wiki links.`);
+    for (const [, raw] of matches) {
+      const target = raw.split("|", 1)[0].trim();
+      if (!target || /[#^]/.test(target)) {
+        errors.add(`${context}: [[${raw}]] must point to a whole Markdown note.`);
+      } else {
+        links.push(target);
       }
-      const linkText = stripWikiTarget(rawLink);
-      if (!linkText) {
-        continue;
-      }
-      links.push(linkText);
     }
   }
   return links;
-}
-
-function parseQuestionsSourceFromFrontmatter(content: string): string[] {
-  const lines = content.split(/\r?\n/);
-  if (lines[0]?.trim() !== "---") {
-    return [];
-  }
-
-  const values: string[] = [];
-  for (let index = 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (line.trim() === "---" || line.trim() === "...") {
-      break;
-    }
-    const match = line.match(/^questions-source\s*:\s*(.*)$/);
-    if (!match) {
-      continue;
-    }
-
-    const inlineValue = (match[1] ?? "").trim();
-    if (inlineValue) {
-      values.push(inlineValue);
-      continue;
-    }
-
-    for (let listIndex = index + 1; listIndex < lines.length; listIndex += 1) {
-      const listLine = lines[listIndex];
-      if (!/^\s+-\s+/.test(listLine)) {
-        break;
-      }
-      values.push(listLine.replace(/^\s+-\s+/, "").trim());
-    }
-    break;
-  }
-  return values;
 }
 
 function collectAttachmentsAndRewriteContent(

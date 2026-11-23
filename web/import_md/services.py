@@ -18,8 +18,9 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.utils import timezone
 
-from core.models import Card, Deck, ExternalId, Import, ImportSession
+from core.models import Card, Deck, ExternalId, Import, ImportSession, NoteSource
 from core.services.decks import ensure_deck_path, plan_deck_path
+from core.services.note_sources import normalise_note_type, resolve_note_type, save_note_type, source_metadata
 
 OBSIDIAN_LINK_PATTERN = re.compile(r'!\[\[(?P<path>[^\]]+)\]\]')
 MEDIA_WIKI_PATTERN = re.compile(
@@ -970,11 +971,38 @@ def prepare_markdown_session(*, user, deck: Deck | None, uploaded_file) -> Impor
     )
 
 
+def _obsidian_note_type(content: str) -> tuple[str, int]:
+    _, frontmatter, _ = _split_frontmatter(content)
+    raw_type = frontmatter.get('note-type')
+    if raw_type is None or raw_type == '':
+        return NoteSource.QUESTIONS, NoteSource.DEFAULT
+    try:
+        return normalise_note_type(raw_type), NoteSource.EXPLICIT
+    except ValueError as exc:
+        raise MarkdownImportError(str(exc)) from exc
+
+
+def _note_type_change(user, root_deck: Deck, source_path: str, note_type: str, priority: int) -> str | None:
+    if priority == NoteSource.DEFAULT:
+        return None
+    saved = source_metadata(user, root_deck, [source_path]).get(source_path)
+    effective_type, _ = resolve_note_type(saved, note_type, priority)
+    if effective_type != (saved.note_type if saved else NoteSource.QUESTIONS):
+        return effective_type
+    return None
+
+
 def audit_markdown_note(*, user, root_deck: Deck, source_path: str, content: str, attachments: dict[str, bytes]) -> dict:
+    type_change = None
     try:
         upload = _build_uploaded_archive_from_note(source_path=source_path, content=content, attachments=attachments)
+        note_type, priority = _obsidian_note_type(content)
         cards = _build_markdown_payload(user=user, deck=root_deck, uploaded_file=upload, audit=True)['cards']
         errors = list(dict.fromkeys(error for card in cards for error in card['errors']))
+        if cards and not errors:
+            type_change = _note_type_change(
+                user, root_deck, _normalise_archive_member_path(source_path), note_type, priority,
+            )
     except MarkdownImportError as exc:
         cards = []
         errors = [str(exc)]
@@ -994,6 +1022,7 @@ def audit_markdown_note(*, user, root_deck: Deck, source_path: str, content: str
         'unchanged': sum(card['unchanged'] and not card['errors'] for card in matched),
         'without_ids': len(cards) - len(identified),
         'errors': errors,
+        **({'note_type_change': type_change} if type_change else {}),
     }
 
 
@@ -1007,6 +1036,7 @@ def prepare_markdown_note_session(
     source_hash: str = '',
 ) -> ImportSession:
     normalised_source_path = _normalise_archive_member_path(source_path)
+    note_type, priority = _obsidian_note_type(content)
     uploaded_file = _build_uploaded_archive_from_note(
         source_path=normalised_source_path,
         content=content,
@@ -1031,6 +1061,9 @@ def prepare_markdown_note_session(
         'root_deck_id': root_deck.id,
         'root_deck_path': root_deck.full_path(),
         'planned_decks': planned_decks,
+        'note_type': note_type,
+        'type_priority': priority,
+        'note_type_change': _note_type_change(user, root_deck, normalised_source_path, note_type, priority),
     }
     session.source_name = normalised_source_path
     session.payload = payload
@@ -1298,6 +1331,15 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
                     'marker_kind': card_data.get('marker_kind'),
                     'source_path': card_data.get('source_path'),
                 }
+            )
+
+        obsidian = payload.get('obsidian')
+        if obsidian and root_deck and Card.objects.filter(
+            user=session.user, source_path=obsidian['source_path'], deck_id__in=root_deck.descendant_ids(),
+        ).exists():
+            save_note_type(
+                session.user, root_deck, obsidian['source_path'], obsidian.get('note_type', NoteSource.QUESTIONS),
+                obsidian.get('type_priority', NoteSource.DEFAULT),
             )
 
         import_record = Import.objects.create(

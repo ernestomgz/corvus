@@ -35,6 +35,9 @@ export class SyncPreviewModal extends Modal {
     const summaryEl = contentEl.createDiv({ cls: "corvus-preview-summary" });
     summaryEl.createEl("div", { text: `Source: ${this.preview.source_path}` });
     summaryEl.createEl("div", { text: `Root deck: ${this.preview.root_deck_path}` });
+    if (this.preview.note_type_change) {
+      summaryEl.createEl("div", { text: `Note type will change to ${this.preview.note_type_change.replace(/-/g, " ")}.` });
+    }
     summaryEl.createEl("div", {
       text:
         `Create ${this.preview.summary.creates ?? 0}, ` +

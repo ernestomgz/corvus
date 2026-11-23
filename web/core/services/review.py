@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import cached_property
 from typing import Optional
 
 from django.db import transaction
@@ -17,6 +18,7 @@ from ..scheduling import (
     grade_card,
     simulate_rating,
 )
+from .note_sources import note_type_label, preset_source_types
 
 RATING_LABELS = {
     0: 'Again',
@@ -42,6 +44,7 @@ class StudyScope:
     tags: list[str] = field(default_factory=list)
     source_paths: list[str] = field(default_factory=list)
     source_root_deck: Optional[Deck] = None
+    note_type: Optional[str] = None
 
     @classmethod
     def from_deck(cls, deck: Deck | None):
@@ -50,7 +53,7 @@ class StudyScope:
         return cls(deck=deck)
 
     @classmethod
-    def from_study_set(cls, study_set: StudySet | None):
+    def from_study_set(cls, study_set: StudySet | None, *, note_type: str | None = None):
         if study_set is None:
             return None
         if study_set.kind == StudySet.KIND_DECK:
@@ -64,6 +67,7 @@ class StudyScope:
                 tags=study_set.tags,
                 source_paths=study_set.source_paths,
                 source_root_deck=study_set.source_root_deck,
+                note_type=note_type,
             )
         return cls(study_set=study_set)
 
@@ -85,13 +89,29 @@ class StudyScope:
 
     def history_key(self) -> str:
         if self.study_set:
-            return f"study_set:{self.study_set.id}"
+            key = f"study_set:{self.study_set.id}"
+            return f"{key}:note_type:{self.note_type}" if self.note_type else key
         deck = self.deck_target
         if deck:
             return f"deck:{deck.id}"
         if self.tag_value:
             return f"tag:{self.tag_value}"
         return 'all'
+
+    @property
+    def note_type_label(self) -> str:
+        return note_type_label(self.note_type) if self.note_type else ''
+
+    @cached_property
+    def note_type_cards(self):
+        if not self.note_type or not self.study_set or not self.source_root_deck:
+            return Card.objects.none()
+        types = preset_source_types(self.study_set)
+        return Card.objects.filter(
+            user_id=self.study_set.user_id,
+            source_path__in=[path for path, kind in types.items() if kind == self.note_type],
+            deck_id__in=self.source_root_deck.descendant_ids(),
+        )
 
 
 def _resolve_scope(deck: Optional[Deck], scope: Optional[StudyScope]) -> Optional[StudyScope]:
@@ -106,6 +126,8 @@ def _scoped_states(user, deck: Optional[Deck] = None, scope: Optional[StudyScope
     resolved_scope = _resolve_scope(deck, scope)
     qs = SchedulingState.objects.select_related('card', 'card__deck').filter(card__user=user)
     if resolved_scope:
+        if resolved_scope.note_type:
+            return qs.filter(card_id__in=resolved_scope.note_type_cards.values('pk'))
         target_deck = resolved_scope.deck_target
         if target_deck is not None:
             qs = qs.filter(card__deck_id__in=target_deck.descendant_ids())

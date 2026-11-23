@@ -211,3 +211,25 @@
     grid-column: 1 / -1;
   }
 }
+.corvus-study-sources {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.corvus-study-sources th,
+.corvus-study-sources td {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--background-modifier-border);
+  overflow-wrap: anywhere;
+}
+
+.corvus-study-sources button.corvus-study-source-link {
+  height: auto;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-accent);
+  text-align: left;
+  white-space: normal;
+}

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from core.models import Card, StudySet
+from core.models import Card, NoteSource, StudySet
 from core.services.review import StudyScope, _scoped_states
 from import_md.services import process_markdown_archive
 
@@ -85,6 +85,7 @@ def test_obsidian_study_set_preview_resolves_linked_notes_to_imported_source_pat
             'source_path': 'notes/Science/math.md',
             'link_text': 'math',
             'card_count': 2,
+            'note_type': 'questions',
             'deck_paths': ['STEM/Science'],
         },
         {
@@ -92,6 +93,7 @@ def test_obsidian_study_set_preview_resolves_linked_notes_to_imported_source_pat
             'source_path': 'Algebra/Polynomials.md',
             'link_text': 'Algebra/Polynomials',
             'card_count': 1,
+            'note_type': 'questions',
             'deck_paths': ['STEM/Algebra'],
         },
     ]
@@ -307,6 +309,7 @@ def test_obsidian_study_set_apply_allows_partial_missing_notes(
             'link_text': 'Geometry',
             'obsidian_path': 'Geometry.md',
             'source_path': 'Geometry.md',
+            'note_type': 'questions',
         }
     ]
 
@@ -337,8 +340,41 @@ def test_obsidian_study_set_apply_rejects_when_no_linked_notes_are_imported(
 
     apply_response = _post_json(api_client, '/api/v1/obsidian/study-set/apply', payload)
     assert apply_response.status_code == 400
-    assert apply_response.json()['error'] == 'all referenced notes must be imported before applying'
-    assert StudySet.objects.filter(user=user, name='Math').exists() is False
+    assert apply_response.json()['error'] == 'At least one source note must have cards in Corvus before saving the preset.'
+    assert not StudySet.objects.filter(user=user, name='Math').exists()
+
+
+def test_obsidian_preset_preview_and_apply_preserve_explicit_note_types(api_client, deck_factory, card_factory):
+    root = deck_factory(name='STEM')
+    practice = deck_factory(user=root.user, name='Practice', parent=root)
+    card_factory(user=root.user, deck=practice, source_path='BJT.md')
+    card_factory(user=root.user, deck=practice, source_path='Exercises.md')
+    card_factory(user=root.user, deck=practice, source_path='Exam.md')
+    NoteSource.objects.create(
+        user=root.user, source_root_deck=root, source_path='Exam.md', note_type='exam-practice',
+        type_priority=NoteSource.EXPLICIT,
+    )
+    api_client.force_login(root.user)
+    payload = _study_set_payload(name='BJT', links=[
+        {'obsidian_path': 'BJT.md'},
+        {'obsidian_path': 'Exercises.md', 'note_type': 'exercises'},
+        {'obsidian_path': 'Exam.md', 'note_type': 'questions'},
+        {'obsidian_path': 'More exercises.md', 'note_type': 'exercises'},
+    ])
+    preview = _post_json(api_client, '/api/v1/obsidian/study-set/preview', payload)
+    assert preview.status_code == 200
+    assert {row['source_path']: row['note_type'] for row in preview.json()['source_paths']} == {
+        'BJT.md': 'questions', 'Exercises.md': 'exercises', 'Exam.md': 'exam-practice',
+    }
+    assert preview.json()['missing'][0]['note_type'] == 'exercises'
+    assert NoteSource.objects.filter(user=root.user).count() == 1
+
+    applied = _post_json(api_client, '/api/v1/obsidian/study-set/apply', payload)
+    assert applied.status_code == 201
+    assert applied.json()['study_set']['source_paths'] == ['BJT.md', 'Exercises.md', 'Exam.md']
+    assert dict(NoteSource.objects.values_list('source_path', 'note_type')) == {
+        'BJT.md': 'questions', 'Exercises.md': 'exercises', 'Exam.md': 'exam-practice', 'More exercises.md': 'exercises',
+    }
 
 
 def test_obsidian_study_set_rejects_non_markdown_or_anchored_links(api_client, user_factory, deck_factory):

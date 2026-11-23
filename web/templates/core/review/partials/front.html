@@ -19,6 +19,7 @@
                 {% endif %}
                 {% if study_set %}
                     <input type="hidden" name="study_set_id" value="{{ study_set.id }}">
+                    {% include 'core/review/partials/note_type_input.html' %}
                 {% endif %}
                 {% if scope and scope.tag_value %}
                     <input type="hidden" name="tag" value="{{ scope.tag_value }}">
@@ -39,6 +40,7 @@
                     {% endif %}
                     {% if study_set %}
                         <input type="hidden" name="study_set_id" value="{{ study_set.id }}">
+                        {% include 'core/review/partials/note_type_input.html' %}
                     {% endif %}
                     {% if scope and scope.tag_value %}
                         <input type="hidden" name="tag" value="{{ scope.tag_value }}">
@@ -68,6 +70,7 @@
                         <input type="hidden" name="card_id" value="{{ card.id }}">
                         {% if deck %}<input type="hidden" name="deck_id" value="{{ deck.id }}">{% endif %}
                         {% if study_set %}<input type="hidden" name="study_set_id" value="{{ study_set.id }}">{% endif %}
+                        {% include 'core/review/partials/note_type_input.html' %}
                         {% if scope and scope.tag_value %}<input type="hidden" name="tag" value="{{ scope.tag_value }}">{% endif %}
                         {% if pull_ahead %}<input type="hidden" name="pull_ahead" value="1">{% endif %}
                         <input type="hidden" name="days" value="1">
@@ -78,6 +81,7 @@
                         <input type="hidden" name="card_id" value="{{ card.id }}">
                         {% if deck %}<input type="hidden" name="deck_id" value="{{ deck.id }}">{% endif %}
                         {% if study_set %}<input type="hidden" name="study_set_id" value="{{ study_set.id }}">{% endif %}
+                        {% include 'core/review/partials/note_type_input.html' %}
                         {% if scope and scope.tag_value %}<input type="hidden" name="tag" value="{{ scope.tag_value }}">{% endif %}
                         {% if pull_ahead %}<input type="hidden" name="pull_ahead" value="1">{% endif %}
                         <input type="hidden" name="days" value="7">
@@ -88,6 +92,7 @@
                         <input type="hidden" name="card_id" value="{{ card.id }}">
                         {% if deck %}<input type="hidden" name="deck_id" value="{{ deck.id }}">{% endif %}
                         {% if study_set %}<input type="hidden" name="study_set_id" value="{{ study_set.id }}">{% endif %}
+                        {% include 'core/review/partials/note_type_input.html' %}
                         {% if scope and scope.tag_value %}<input type="hidden" name="tag" value="{{ scope.tag_value }}">{% endif %}
                         {% if pull_ahead %}<input type="hidden" name="pull_ahead" value="1">{% endif %}
                         <input type="hidden" name="days" value="30">
@@ -99,6 +104,7 @@
                         <input type="hidden" name="card_id" value="{{ card.id }}">
                         {% if deck %}<input type="hidden" name="deck_id" value="{{ deck.id }}">{% endif %}
                         {% if study_set %}<input type="hidden" name="study_set_id" value="{{ study_set.id }}">{% endif %}
+                        {% include 'core/review/partials/note_type_input.html' %}
                         {% if scope and scope.tag_value %}<input type="hidden" name="tag" value="{{ scope.tag_value }}">{% endif %}
                         {% if pull_ahead %}<input type="hidden" name="pull_ahead" value="1">{% endif %}
                         <button type="submit" class="text-left text-red-600 hover:text-red-700">Delete card</button>

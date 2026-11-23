@@ -141,6 +141,8 @@ export class CorvusClient {
       links: source.links.map((link) => ({
         link_text: link.linkText,
         obsidian_path: link.obsidianPath,
+        note_type: link.noteType,
+        note_type_explicit: link.noteTypeExplicit,
       })),
     };
   }

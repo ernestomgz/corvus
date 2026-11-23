@@ -24,7 +24,7 @@ def test_top_level_deck_name_migration_preserves_existing_data(deck_factory, car
         assert Card.objects.filter(pk=card.pk, deck=second).exists()
     finally:
         Deck.objects.filter(pk=second.pk).update(name='Shared archive')
-        MigrationExecutor(connection).migrate(target)
+        MigrationExecutor(connection).migrate([('core', '0003_note_source')])
 
     card.refresh_from_db()
     assert card.deck_id == second.pk

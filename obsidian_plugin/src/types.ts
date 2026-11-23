@@ -42,11 +42,14 @@ export interface NoteSyncAudit {
   unchanged: number;
   without_ids: number;
   errors: string[];
+  note_type_change?: string;
 }
 
 export interface StudySetLinkSource {
   linkText: string;
   obsidianPath: string;
+  noteType?: string;
+  noteTypeExplicit?: boolean;
 }
 
 export interface StudySetSource {
@@ -55,6 +58,7 @@ export interface StudySetSource {
   path: string;
   sourceHash: string;
   links: StudySetLinkSource[];
+  errors: string[];
 }
 
 export interface PreviewCard {
@@ -96,6 +100,7 @@ export interface PreviewSession {
   source_hash: string;
   source_path: string;
   root_deck_path: string;
+  note_type_change?: string;
   summary: {
     creates?: number;
     updates?: number;
@@ -143,6 +148,7 @@ export interface StudySetPreviewSourcePath {
   source_path: string;
   link_text: string;
   card_count: number;
+  note_type?: string;
   deck_paths: string[];
 }
 
@@ -150,6 +156,7 @@ export interface StudySetPreviewMissing {
   link_text: string;
   obsidian_path: string;
   source_path: string;
+  note_type?: string;
 }
 
 export interface StudySetPreview {

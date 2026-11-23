@@ -82,9 +82,7 @@
                 <a href="{{ study_url }}" class="rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Study now</a>
             {% endwith %}
         {% elif active_study_set %}
-            {% with study_url=base_study_url|add:'?study_set_id='|add:active_study_set.id %}
-                <a href="{{ study_url }}" class="rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Study now</a>
-            {% endwith %}
+            {% include 'core/review/partials/start_preset.html' with study_set=active_study_set start_label='Study now' %}
         {% elif active_scope and active_scope.tag_value %}
             {% with study_url=base_study_url|add:'?tag='|add:active_scope.tag_value|urlencode %}
                 <a href="{{ study_url }}" class="rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Study now</a>

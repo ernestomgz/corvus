@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from django import template
+from ..services.note_sources import preset_note_types
 
 register = template.Library()
+register.filter('preset_note_types', preset_note_types)
 
 
 @register.filter

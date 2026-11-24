@@ -24,6 +24,7 @@ from core.models import (
     ImportSession,
     KnowledgeMap,
     KnowledgeNode,
+    NoteSource,
     Review,
     SchedulingState,
     StudySet,
@@ -32,6 +33,7 @@ from core.scheduling import ensure_state
 from core.services.review import get_next_card, get_today_summary, grade_card_for_user
 from core.services.decks import get_deck_by_full_path
 from core.services.knowledge_maps import KnowledgeMapImportError, import_knowledge_map_from_payload
+from core.services.note_sources import normalise_note_type, resolve_note_type, save_note_type, source_metadata
 from import_anki.services import AnkiImportError, process_apkg_archive
 from import_md.services import (
     MarkdownImportError,
@@ -167,13 +169,13 @@ def _normalise_obsidian_note_path(raw_path: Any) -> str:
     return normalised
 
 
-def _parse_obsidian_study_set_links(raw_links: Any) -> list[dict[str, str]]:
+def _parse_obsidian_study_set_links(raw_links: Any) -> list[dict[str, Any]]:
     if not isinstance(raw_links, list):
         raise ValueError('links must be a list')
     if not raw_links:
         raise ValueError('at least one linked markdown note is required')
 
-    links: list[dict[str, str]] = []
+    links: list[dict[str, Any]] = []
     seen_paths: set[str] = set()
     for item in raw_links:
         if not isinstance(item, dict):
@@ -183,10 +185,18 @@ def _parse_obsidian_study_set_links(raw_links: Any) -> list[dict[str, str]]:
             continue
         seen_paths.add(obsidian_path)
         link_text = str(item.get('link_text') or item.get('linkText') or obsidian_path).strip()
+        note_type = item.get('note_type')
+        if note_type is None:
+            note_type, priority = NoteSource.QUESTIONS, NoteSource.DEFAULT
+        else:
+            note_type = normalise_note_type(note_type)
+            priority = NoteSource.EXPLICIT if item.get('note_type_explicit') is True else NoteSource.INFERRED
         links.append(
             {
                 'link_text': link_text or obsidian_path,
                 'obsidian_path': obsidian_path,
+                'note_type': note_type,
+                'type_priority': priority,
             }
         )
     return links
@@ -197,12 +207,14 @@ def _study_set_source_to_dict(
     obsidian_path: str,
     link_text: str,
     cards: list[Card],
+    note_type: str,
 ) -> dict:
     return {
         'obsidian_path': obsidian_path,
         'source_path': obsidian_path,
         'link_text': link_text,
         'card_count': len(cards),
+        'note_type': note_type,
         'deck_paths': sorted({card.deck.full_path() for card in cards}),
     }
 
@@ -221,7 +233,7 @@ def _study_set_to_dict(study_set: StudySet, decks: list[Deck] | None = None) -> 
     }
 
 
-def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tuple[dict, list[Deck], StudySet | None, Deck]:
+def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tuple[dict, StudySet | None, Deck, list[dict]]:
     name = str(payload.get('name') or '').strip()
     root_deck_path = str(payload.get('root_deck_path') or '').strip()
     source_path = str(payload.get('source_path') or '').strip()
@@ -241,10 +253,10 @@ def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tu
     if existing is None:
         existing = StudySet.objects.filter(user=user, name=name).order_by('id').first()
 
-    decks: list[Deck] = []
     source_payloads: list[dict] = []
     missing: list[dict] = []
     source_paths = [link['obsidian_path'] for link in links]
+    metadata_by_path = source_metadata(user, root_deck, source_paths)
     resolved_root_path = root_deck.full_path()
     allowed_deck_ids = set(root_deck.descendant_ids(include_self=True))
     cards_by_source_path: dict[str, list[Card]] = {path: [] for path in source_paths}
@@ -258,13 +270,16 @@ def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tu
             cards_by_source_path[card.source_path].append(card)
 
     for link in links:
-        cards = cards_by_source_path.get(link['obsidian_path'], [])
+        path = link['obsidian_path']
+        note_type, _ = resolve_note_type(metadata_by_path.get(path), link['note_type'], link['type_priority'])
+        cards = cards_by_source_path.get(path, [])
         if not cards:
             missing.append(
                 {
                     'link_text': link['link_text'],
                     'obsidian_path': link['obsidian_path'],
                     'source_path': link['obsidian_path'],
+                    'note_type': note_type,
                 }
             )
             continue
@@ -273,6 +288,7 @@ def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tu
                 obsidian_path=link['obsidian_path'],
                 link_text=link['link_text'],
                 cards=cards,
+                note_type=note_type,
             )
         )
 
@@ -302,7 +318,7 @@ def _build_obsidian_study_set_preview(user: User, payload: dict[str, Any]) -> tu
         'source_paths': source_payloads,
         'missing': missing,
     }
-    return preview, decks, existing, root_deck
+    return preview, existing, root_deck, links
 
 
 def _serialise_obsidian_session(session: ImportSession) -> dict[str, Any]:
@@ -346,6 +362,7 @@ def _serialise_obsidian_session(session: ImportSession) -> dict[str, Any]:
         'root_deck_path': root_deck_path,
         'summary': payload.get('summary', {}),
         'planned_decks': list(obsidian.get('planned_decks') or []),
+        'note_type_change': obsidian.get('note_type_change'),
         'has_errors': bool(payload.get('summary', {}).get('has_errors')),
         'cards': cards_payload,
     }
@@ -1085,7 +1102,7 @@ def obsidian_study_set_apply(request: HttpRequest) -> JsonResponse:
         payload = _parse_json(request)
         if not isinstance(payload, dict):
             return _json_error('payload must be an object')
-        preview, decks, study_set, root_deck = _build_obsidian_study_set_preview(user, payload)
+        preview, study_set, root_deck, links = _build_obsidian_study_set_preview(user, payload)
     except ValueError as exc:
         return _json_error(str(exc))
     except LookupError as exc:
@@ -1095,7 +1112,7 @@ def obsidian_study_set_apply(request: HttpRequest) -> JsonResponse:
         return JsonResponse(
             {
                 **preview,
-                'error': 'all referenced notes must be imported before applying',
+                'error': 'At least one source note must have cards in Corvus before saving the preset.',
             },
             status=400,
         )
@@ -1136,12 +1153,14 @@ def obsidian_study_set_apply(request: HttpRequest) -> JsonResponse:
                 ]
             )
 
-        study_set.decks.set(decks)
+        study_set.decks.clear()
+        for link in sorted(links, key=lambda item: item['obsidian_path']):
+            save_note_type(user, root_deck, link['obsidian_path'], link['note_type'], link['type_priority'])
     return JsonResponse(
         {
             'status': 'applied',
             'action': action,
-            'study_set': _study_set_to_dict(study_set, decks),
+            'study_set': _study_set_to_dict(study_set, []),
         },
         status=201 if action == 'created' else 200,
     )

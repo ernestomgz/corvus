@@ -69,6 +69,26 @@ class Deck(models.Model):
         return visited
 
 
+class NoteSource(models.Model):
+    QUESTIONS = 'questions'
+    DEFAULT = 0
+    INFERRED = 1
+    EXPLICIT = 2
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    source_root_deck = models.ForeignKey(Deck, on_delete=models.CASCADE)
+    source_path = models.TextField()
+    note_type = models.CharField(max_length=64, default=QUESTIONS)
+    type_priority = models.PositiveSmallIntegerField(default=DEFAULT)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'source_root_deck', 'source_path'], name='unique_note_source_per_root',
+            ),
+        ]
+
+
 class StudySet(models.Model):
     KIND_DECK = 'deck'
     KIND_TAG = 'tag'

@@ -58,6 +58,7 @@ test("filters audit notes by updates, deck moves, and ID issues", async () => {
     note("Current.md"),
     note("Changed.md", { updates: 1 }),
     note("Moved.md", { updates: 1, moves: 1 }),
+    note("Type.md", { note_type_change: "exam-practice" }),
     note("Local.md", { without_ids: 1 }),
     note("Missing.md", { found: 0 }),
     note("Copy.md", { identities: [shared] }),
@@ -73,12 +74,13 @@ test("filters audit notes by updates, deck moves, and ID issues", async () => {
   const names = () => rows().map((row) => row.children[0].children[0].textContent);
 
   assert.deepEqual(toolbar.children.map((button) => button.textContent), [
-    "All (10)", "Updates (2)", "Deck moves (1)", "ID issues (5)", "Up to date (1)",
+    "All (11)", "Updates (3)", "Deck moves (1)", "ID issues (5)", "Up to date (1)",
   ]);
   assert.equal(all.attrs["aria-pressed"], "true");
   assert.equal(names()[0], "Unread.md");
   updates.click();
-  assert.deepEqual(names(), ["Changed.md", "Moved.md"]);
+  assert.deepEqual(names(), ["Changed.md", "Moved.md", "Type.md"]);
+  assert.match(rows()[2].children[2].textContent, /Type change to exam practice/);
   moves.click();
   assert.deepEqual(names(), ["Moved.md"]);
   assert.equal(updates.attrs["aria-pressed"], "false");

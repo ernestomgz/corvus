@@ -1,0 +1,19 @@
+{% load study_sets %}
+{% with types=study_set|preset_note_types %}
+    {% url 'review:study' as study_url %}
+    <div class="inline-flex items-stretch">
+        <a href="{{ study_url }}?study_set_id={{ study_set.id }}" class="inline-flex items-center justify-center {% if types|length > 1 %}rounded-l{% else %}rounded{% endif %} bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800">{{ start_label|default:'Start' }}</a>
+        {% if types|length > 1 %}
+            <details class="relative">
+                <summary class="flex h-full cursor-pointer list-none items-center rounded-r border-l border-gray-600 bg-gray-900 px-3 text-white hover:bg-gray-800" aria-label="Choose note type for {{ study_set.name }}">
+                    <span aria-hidden="true">▾</span>
+                </summary>
+                <ul class="absolute right-0 z-10 mt-1 w-48 rounded border bg-white py-1 text-sm text-gray-800 shadow-lg">
+                    {% for type in types %}
+                        <li><a class="block px-3 py-2 hover:bg-gray-100 focus:bg-gray-100" href="{{ study_url }}?study_set_id={{ study_set.id }}&amp;note_type={{ type.slug|urlencode }}">{{ type.label }} only</a></li>
+                    {% endfor %}
+                </ul>
+            </details>
+        {% endif %}
+    </div>
+{% endwith %}

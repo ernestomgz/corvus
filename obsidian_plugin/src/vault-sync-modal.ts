@@ -33,7 +33,7 @@ export class VaultSyncModal extends Modal {
       const idIssues = warnings.length > 0 || (audit !== null && (
         audit.found < audit.identified || audit.without_ids > 0 || hasRepeatedMarkerId(audit)
       ));
-      const updates = (audit?.updates ?? 0) > 0;
+      const updates = (audit?.updates ?? 0) > 0 || Boolean(audit?.note_type_change);
       const moves = (audit?.moves ?? 0) > 0;
       const upToDate = audit !== null && !updates && !moves && !idIssues && audit.errors.length === 0;
       return { row, warnings, idIssues, updates, moves, upToDate };
@@ -100,6 +100,7 @@ export class VaultSyncModal extends Modal {
       if (missing) status.push(`${missing} missing`);
       if (audit.without_ids) status.push(`${audit.without_ids} without IDs`);
       if (audit.updates) status.push(`${audit.updates} to update${audit.moves ? ` (${audit.moves} to move)` : ""}`);
+      if (audit.note_type_change) status.push(`Type change to ${audit.note_type_change.replace(/-/g, " ")}`);
       if (status.length && audit.unchanged) status.push(`${audit.unchanged} up to date`);
     }
     const statusText = status.join(" · ") || (details.length ? "Needs review" : "Up to date");

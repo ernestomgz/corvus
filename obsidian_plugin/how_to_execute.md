@@ -120,10 +120,14 @@ The check sends candidate notes and their attachments to the configured Corvus s
 The plugin and Corvus only check these kebab-case frontmatter keys. Other frontmatter keys can remain in your notes; they are ignored by Corvus.
 
 - `questions-source`: read by the Obsidian plugin when creating or updating a custom study preset. It must contain one or more Obsidian wiki links to markdown notes.
+- `exercises-source`: optional links to exercise notes. It uses the same format as `questions-source`.
+- `note-type`: optional explicit type on the source note, such as `exam-practice`. It takes precedence over the type inferred from companion links. Use `note-type: questions` to change an explicit type back to Questions.
 - `card-tags`: read by Corvus. These tags are applied to every card imported from that markdown file.
 - `card-heading-context`: read by Corvus. Set to `false` to stop Corvus from prepending the Markdown heading hierarchy to each imported card front.
 
-`questions-source` is not used by `Corvus Sync: Sync Current Note`. Import the main note and the question note as separate sync actions. When creating a custom study preset, the plugin reads each note linked by the preset note and expands that note's `questions-source` into additional preset sources.
+Use `Corvus Sync: Sync Current Note` on each source note. When creating a custom study preset, the plugin follows `questions-source` and `exercises-source` from each note linked by the preset note. Main notes default to Questions. Exercise companions count as Exercises unless they specify a `note-type`.
+
+If you change a synced note's `note-type`, the vault sync check lists it under **Updates** and the note sync preview shows the new type.
 
 Preset note:
 
@@ -138,7 +142,8 @@ Linked note:
 ---
 created: 2026-05-23T16:03
 last-modified: 2026-05-23T16:03
-questions-source:"[[Questions Function]]"
+questions-source: "[[Questions Function]]"
+exercises-source: "[[Exercises Function]]"
 card-heading-context: false
 card-tags:
   - calculus
@@ -150,7 +155,9 @@ Function
 Definition
 ```
 
-The preset will include imported cards whose `source_path` is `Function.md` and `Questions Function.md`.
+The preset preview shows the type and card count for `Function.md`, `Questions Function.md`, and `Exercises Function.md`. Click a note to open it in Obsidian. If a source has no cards in Corvus, you can save the preset with the sources that are ready and run the preset command again after syncing the rest.
+
+On the Corvus website, **Start** studies the whole preset. Presets with multiple note types show an arrow beside Start. Choose **Questions only**, **Exercises only**, or another available type for that session.
 
 Example with multiple question source notes in a linked note:
 
@@ -163,7 +170,7 @@ card-tags: calculus, practice
 ---
 ```
 
-`questions-source` links must point to notes. Links to headings or blocks, such as `[[Questions#Section]]` or `[[Questions^block]]`, are rejected.
+Companion links must point to whole notes. A link to a heading or a block must be corrected before saving the preset.
 
 
 ## Development Loop
@@ -194,6 +201,6 @@ This plugin expects these Corvus endpoints to exist:
 ## Notes
 
 - The note sync command imports only the current note.
-- The custom study preset command expands `questions-source` from notes linked by the preset note.
+- The custom study preset command expands both companion fields one level from notes linked by the preset note.
 - Corvus remains responsible for markdown parsing, preview generation, media handling, and deck creation below the configured root.
 - If the note changes after preview, the plugin refuses to write IDs back and asks you to run sync again.

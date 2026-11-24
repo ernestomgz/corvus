@@ -1,4 +1,4 @@
-import { ButtonComponent, Modal } from "obsidian";
+import { ButtonComponent, Modal, Notice, TFile } from "obsidian";
 
 import type { StudySetPreview } from "./types";
 
@@ -7,7 +7,7 @@ export class StudySetPreviewModal extends Modal {
 
   private resolver: ((value: boolean) => void) | null = null;
 
-  constructor(app: Modal["app"], private readonly preview: StudySetPreview) {
+  constructor(app: Modal["app"], private readonly preview: StudySetPreview, private readonly sourceErrors: string[]) {
     super(app);
     this.modalEl.addClass("corvus-preview-modal");
   }
@@ -35,35 +35,32 @@ export class StudySetPreviewModal extends Modal {
         `${this.preview.summary.source_path_count} source note(s), ${this.preview.summary.card_count} card(s)`,
     });
 
-    if (this.preview.source_paths.length > 0) {
-      const sourcesEl = contentEl.createDiv({ cls: "corvus-preview-decks" });
-      sourcesEl.createEl("strong", { text: "Imported source notes" });
-      const list = sourcesEl.createEl("ul");
-      for (const sourcePath of this.preview.source_paths) {
-        list.createEl("li", {
-          text:
-            `${sourcePath.obsidian_path} -> ${sourcePath.source_path} ` +
-            `(${sourcePath.card_count} card(s), ${sourcePath.deck_paths.join(", ")})`,
-        });
-      }
+    const table = contentEl.createEl("table", { cls: "corvus-study-sources" });
+    const header = table.createEl("thead").createEl("tr");
+    for (const title of ["Note", "Type", "Status"]) header.createEl("th", { text: title, attr: { scope: "col" } });
+    const body = table.createEl("tbody");
+    for (const source of [...this.preview.source_paths, ...this.preview.missing]) {
+      const row = body.createEl("tr");
+      const note = row.createEl("td");
+      const link = note.createEl("button", {
+        cls: "corvus-study-source-link", text: source.obsidian_path, attr: { type: "button" },
+      });
+      link.addEventListener("click", () => void this.openSource(source.obsidian_path));
+      const label = (source.note_type ?? "questions").replace(/-/g, " ");
+      row.createEl("td", { text: label.charAt(0).toUpperCase() + label.slice(1) });
+      const status = "card_count" in source ? `${source.card_count} ${source.card_count === 1 ? "card" : "cards"}` : "No cards in this root deck";
+      row.createEl("td", { text: status });
     }
 
-    if (this.preview.missing.length > 0) {
-      const missingEl = contentEl.createDiv({ cls: "corvus-preview-errors" });
-      missingEl.createEl("strong", { text: "Not imported yet" });
-      const list = missingEl.createEl("ul");
-      for (const missing of this.preview.missing) {
-        list.createEl("li", {
-          text: `${missing.obsidian_path} -> ${missing.source_path}`,
-        });
-      }
+    if (this.preview.missing.length > 0 && !this.preview.has_errors && !this.sourceErrors.length) {
+      contentEl.createEl("p", { text: "Only notes with cards in Corvus will be included." });
     }
-
-    if (this.preview.errors.length > 0) {
+    const errors = [...this.sourceErrors, ...this.preview.errors];
+    if (errors.length > 0) {
       const errorsEl = contentEl.createDiv({ cls: "corvus-preview-errors" });
       errorsEl.createEl("strong", { text: "Errors" });
       const list = errorsEl.createEl("ul");
-      for (const error of this.preview.errors) {
+      for (const error of errors) {
         list.createEl("li", { text: error });
       }
     }
@@ -75,8 +72,22 @@ export class StudySetPreviewModal extends Modal {
     new ButtonComponent(actionsEl)
       .setCta()
       .setButtonText(this.preview.will_update ? "Update Preset" : "Create Preset")
-      .setDisabled(this.preview.has_errors)
+      .setDisabled(this.preview.has_errors || this.sourceErrors.length > 0)
       .onClick(() => this.finish(true));
+  }
+
+  private async openSource(path: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      new Notice(`Could not open ${path}.`);
+      return;
+    }
+    try {
+      await this.app.workspace.getLeaf(false).openFile(file);
+      this.finish(false);
+    } catch {
+      new Notice(`Could not open ${path}.`);
+    }
   }
 
   onClose(): void {

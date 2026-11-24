@@ -335,6 +335,7 @@ def _serialise_obsidian_session(session: ImportSession) -> dict[str, Any]:
             {
                 'index': card.get('index'),
                 'marker_line': card.get('marker_line'),
+                'marker_column': card.get('marker_column'),
                 'marker_kind': card.get('marker_kind'),
                 'import_id': card.get('import_id'),
                 'front_md': card.get('front_md'),

@@ -7,6 +7,7 @@ import bleach
 from markdown_it import MarkdownIt
 from mdit_py_plugins.dollarmath import dollarmath_plugin
 
+from .markdown_syntax import literal_code_ranges
 
 _MATH_BLOCK_PATTERN = re.compile(r"\[\$\$](?P<body>.+?)\[/\$\$]", re.DOTALL)
 _HTML_SNIFFER = re.compile(r"<\s*([a-zA-Z!/?])")
@@ -33,6 +34,7 @@ _ALLOWED_ATTRIBUTES = {
     **bleach.sanitizer.ALLOWED_ATTRIBUTES,
     'a': ['href', 'title', 'name', 'target', 'rel'],
     'img': ['src', 'alt', 'title', 'width', 'height'],
+    'ol': ['start'],
     'span': ['class'],
     'div': ['class'],
     'code': ['class'],
@@ -334,18 +336,15 @@ def _render_markdown_cached(raw: str) -> str:
         text = _normalise_wiki_links(_normalise_legacy_math(text))
         return _extract_math_segments(text, segments)[0]
 
-    # Keep math delimiters in code blocks literal, including TeX consumed by TikZJax.
+    # Keep math and wiki syntax literal in both code spans and code blocks.
     raw = raw.replace('\r\n', '\n').replace('\r', '\n')
-    lines = raw.splitlines(keepends=True)
     parts = []
     start = 0
-    for token in _markdown.parse(raw):
-        if token.type in {'fence', 'code_block'} and token.map is not None:
-            code_start, code_end = token.map
-            parts.append(prepare(''.join(lines[start:code_start])))
-            parts.append(''.join(lines[code_start:code_end]))
-            start = code_end
-    parts.append(prepare(''.join(lines[start:])))
+    for code_start, code_end in literal_code_ranges(raw):
+        parts.append(prepare(raw[start:code_start]))
+        parts.append(raw[code_start:code_end])
+        start = code_end
+    parts.append(prepare(raw[start:]))
     rendered = _markdown.render(''.join(parts))
     if segments:
         rendered = _restore_block_paragraphs(rendered, segments)

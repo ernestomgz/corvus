@@ -47,6 +47,7 @@
                                 <div>
                                     <div class="text-xs uppercase tracking-wide text-gray-500">Deck</div>
                                     <div class="text-sm text-gray-700">{{ card.target_deck_path }}</div>
+                                    <div class="text-xs text-gray-500">{{ card.source_path }} · Line {{ card.marker_line }}</div>
                                     {% if card.import_id %}
                                         <div class="text-xs uppercase tracking-wide text-gray-500 mt-1">ID</div>
                                         <div class="text-sm text-gray-700 font-mono">{{ card.import_id }}</div>
@@ -110,6 +111,7 @@
                                     <div>
                                         <div class="text-xs uppercase tracking-wide text-gray-500">Deck</div>
                                         <div class="text-sm text-gray-700">{{ card.target_deck_path }}</div>
+                                        <div class="text-xs text-gray-500">{{ card.source_path }} · Line {{ card.marker_line }}</div>
                                         {% if card.metadata_changes.deck %}
                                             <div class="text-xs text-gray-500">Moves from {{ card.metadata_changes.deck.from }}</div>
                                         {% endif %}

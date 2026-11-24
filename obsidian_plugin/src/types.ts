@@ -30,6 +30,7 @@ export interface NoteSyncSource {
   content: string;
   sourceHash: string;
   originalLineNumbers?: number[];
+  originalMarkerColumn?: (lineNumber: number, column: number) => number;
   attachments: NoteAttachment[];
 }
 
@@ -42,6 +43,7 @@ export interface NoteSyncAudit {
   unchanged: number;
   without_ids: number;
   errors: string[];
+  error_locations?: { marker_line: number; errors: string[] }[];
   note_type_change?: string;
 }
 
@@ -64,6 +66,7 @@ export interface StudySetSource {
 export interface PreviewCard {
   index: number;
   marker_line: number;
+  marker_column?: number | null;
   marker_kind: "card" | "reverse" | string;
   import_id: string | null;
   front_md: string;

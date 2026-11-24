@@ -30,6 +30,52 @@ The marker can also be inline:
 Paris
 ```
 
+Each side needs content. A heading used as the question, a formula, an image, or a code block can supply a side. The preview shows **Missing question** or **Missing answer** with the note and marker line. Fix those errors in the source before applying.
+
+Leave a blank line before the next short card's standalone question. A question on the same line as its marker already marks the beginning of a new card.
+
+```md
+What does `git status` show? #card
+The working tree status.
+
+What does `git diff` show?
+#card
+Unstaged changes.
+```
+
+### Code and images
+
+Inline code and fenced blocks work on both sides. Corvus preserves blank lines within a fence, even in a short card. The marker inside this code example is literal text.
+
+````md
+What does `#card` mean in this example? #card
+```markdown
+A question #card
+
+An answer
+```
+````
+
+An escaped `\#card` also stays literal. Image examples inside code stay literal. A real image link can include spaces or parentheses in its filename, alt text, and an optional title.
+
+```md
+Which circuit is this? #card
+![Circuit diagram](<Images/diagram final.png> "Circuit layout")
+```
+
+### Lists
+
+Lists keep their indentation and starting number in preview and review.
+
+```md
+Which checks are still pending?
+3. Check the collector current.
+   - Compare it with the expected value.
+4. Check the emitter voltage.
+#card
+Both readings should match the circuit analysis.
+```
+
 ## Reverse Cards
 
 ```md
@@ -149,6 +195,8 @@ Front:
 What is a derivative?
 ```
 
+A card on a heading line uses that heading as its question and includes only the heading's parents in the breadcrumb. An H1 has no parent. A standalone marker directly under a heading can use that heading as its question. The final `##` in `## Derivatives ##` is heading syntax. A hashtag such as `#revision` and a YAML `title` stay outside the heading hierarchy.
+
 Inline IDs are supported:
 
 ```md
@@ -178,6 +226,13 @@ Rome
 Each Markdown file gets its own deck, including the `.md` extension. Folders group those decks. With `STEM` selected as the parent, `Electronics/BJT.md` goes to `STEM/Electronics/BJT.md`. Leave the parent blank to import into `Electronics/BJT.md` at the top level. A standalone `.md` file can also be imported without a parent deck.
 
 Folder names ending in `.md` use `%2E` in place of the dot before `md`, and literal `%` in folder names becomes `%25`. The note and attachment paths used for media and study presets keep their original names.
+
+## From upload to review
+
+1. The upload view in `web/import_md/views.py` accepts a Markdown file or ZIP. Obsidian sends the note and its attachments through the API in `web/api/views.py`.
+2. `web/import_md/services.py` opens the archive, reads the Markdown, builds the front and back around each marker, and resolves attachment paths. The preview records cards and validation errors. Vault Sync Check uses the same parser in read-only mode.
+3. Apply creates or updates `Card` rows. `front_md` and `back_md` store Markdown. Updating by an existing card ID preserves its scheduling state. Obsidian writes new IDs to the original marker, even when a TikZ block earlier in the note was converted to an image for upload.
+4. `web/core/services/markdown_renderer.py` turns the stored Markdown into sanitized HTML for import preview, card details, and review. The browser typesets math. Obsidian-rendered TikZ diagrams arrive as image attachments.
 
 ## Media
 

@@ -4,22 +4,27 @@ import hashlib
 import html
 import io
 import json
+import posixpath
 import re
 import zipfile
 import difflib
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
+from urllib.parse import unquote
 
 import yaml
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.utils import timezone
+from markdown_it.helpers import parseLinkDestination, parseLinkTitle
 
 from core.models import Card, Deck, ExternalId, Import, ImportSession, NoteSource
 from core.services.decks import ensure_deck_path, plan_deck_path
+from core.services.markdown_syntax import code_block_lines, code_mask, is_escaped, separate_numbered_lists
 from core.services.note_sources import normalise_note_type, resolve_note_type, save_note_type, source_metadata
 
 OBSIDIAN_LINK_PATTERN = re.compile(r'!\[\[(?P<path>[^\]]+)\]\]')
@@ -30,14 +35,13 @@ MEDIA_WIKI_PATTERN = re.compile(
 ID_PATTERN = re.compile(r'^\s*id::\s*(?P<id>[\w:-]+)', re.IGNORECASE)
 # Marker ids are the stable card identity used by current imports. Reverse markers may carry
 # a pair like id:front_id|reverse_id so each generated card can be updated independently.
-IMPORT_ID_PATTERN = re.compile(
-    r'(?<!\w)(?:#card(?:-reverse)?|#long-card(?:-reverse)?)\s+id:([^\s]+)',
-    re.IGNORECASE,
-)
+IMPORT_ID_PATTERN = re.compile(r'^[ \t]+id:(\S+)', re.IGNORECASE)
 TAGS_PATTERN = re.compile(r'^\s*tags::\s*(?P<tags>.+)$', re.IGNORECASE)
-MEDIA_PATTERN = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
-HEADING_PATTERN = re.compile(r'^\s*#+\s*')
-HEADING_CAPTURE_PATTERN = re.compile(r'^\s*(?P<hashes>#{1,6})\s*(?P<title>.+)$')
+IMAGE_OPEN_PATTERN = re.compile(r'!\[(?:\\.|[^\[\]\\\n]|\[[^\]\n]*\])*\]\([ \t]*')
+WIKI_LINK_PATTERN = re.compile(r'\[\[[^\]\n]+\]\]')
+HORIZONTAL_SPACE = re.compile(r'[ \t]*')
+HEADING_CAPTURE_PATTERN = re.compile(r'^ {0,3}(?P<hashes>#{1,6})(?:[ \t]+|$)')
+HEADING_CLOSE_PATTERN = re.compile(r'(?:^|[ \t]+)#+[ \t]*$')
 
 
 @dataclass
@@ -53,6 +57,7 @@ class ParsedCard:
     deck_path: list[str]
     errors: list[str]
     marker_line: int
+    marker_column: int
     marker_kind: str
     had_explicit_import_id: bool = False
     import_id: str | None = None
@@ -68,7 +73,6 @@ class MarkerRule:
 @dataclass
 class MarkerResolver:
     pattern: re.Pattern
-    clean_pattern: re.Pattern
     lookup: dict[str, MarkerRule]
 
 
@@ -256,8 +260,7 @@ def _build_marker_resolver(user) -> MarkerResolver:
     # Markers must end at whitespace or end-of-line; this intentionally rejects
     # unsupported forms such as #card/reverse and ordinary words like #cardinal.
     marker_regex = re.compile(rf'(?<!\w)(?P<marker>{joined})(?=$|\s)', re.IGNORECASE)
-    clean_pattern = re.compile(rf'(?<!\w)(?:{joined})(?=$|\s)', re.IGNORECASE)
-    return MarkerResolver(pattern=marker_regex, clean_pattern=clean_pattern, lookup=lookup)
+    return MarkerResolver(pattern=marker_regex, lookup=lookup)
 
 
 def _ensure_media_directory(user_id: int) -> Path:
@@ -267,49 +270,58 @@ def _ensure_media_directory(user_id: int) -> Path:
 
 
 def _resolve_media(user_id: int, zip_file: zipfile.ZipFile, asset_path: str, *, write_media: bool) -> Tuple[str, dict] | None:
-    normalised_asset = asset_path.lstrip('./')
     try:
-        data = zip_file.read(normalised_asset)
+        data = zip_file.read(asset_path)
     except KeyError:
         return None
     digest = hashlib.sha1(data).hexdigest()
-    suffix = Path(normalised_asset).suffix or ''
+    suffix = Path(asset_path).suffix
     filename = f"{digest}{suffix}"
     if write_media:
         destination_path = _ensure_media_directory(user_id) / filename
         if not destination_path.exists():
             destination_path.write_bytes(data)
     url = f"{settings.MEDIA_URL}{user_id}/{filename}".replace('//', '/')
-    return url, {'name': Path(normalised_asset).name, 'url': url, 'hash': digest}
+    return url, {'name': Path(asset_path).name, 'url': url, 'hash': digest}
+
+
+def _image_destinations(text: str, mask: bytearray) -> Iterator[tuple[int, int, str]]:
+    for match in IMAGE_OPEN_PATTERN.finditer(text):
+        if mask[match.start()] or is_escaped(text, match.start()):
+            continue
+        start = match.end()
+        destination = parseLinkDestination(text, start, len(text))
+        if not destination.ok:
+            continue
+        end = destination.pos
+        after = HORIZONTAL_SPACE.match(text, end).end()
+        if after > end and text[after:after + 1] != ')':
+            title = parseLinkTitle(text, after, len(text))
+            if not title.ok:
+                continue
+            after = HORIZONTAL_SPACE.match(text, title.pos).end()
+        if text[after:after + 1] == ')':
+            mask[match.start():after + 1] = b'\1' * (after + 1 - match.start())
+            yield start, end, unquote(destination.str)
 
 
 def _rewrite_media_links(
     text: str, *, user_id: int, zip_file: zipfile.ZipFile, summary: dict, source_dir: str | None, write_media: bool,
 ) -> Tuple[str, list[dict], list[str]]:
+    if '[' not in text:
+        return text, [], []
     media_items: list[dict] = []
     missing_assets: list[str] = []
 
-    def _candidate_paths(asset: str) -> list[str]:
-        asset_clean = str(Path(asset).as_posix()).lstrip('/').lstrip('./')
-        candidates: list[str] = []
-        if source_dir:
-            base = Path(source_dir)
-            direct = (base / asset_clean).as_posix()
-            attachments = (base / 'attachments' / asset_clean).as_posix()
-            candidates.extend([direct, attachments])
-        candidates.append(asset_clean)
-        unique: list[str] = []
-        for path in candidates:
-            normalised = str(Path(path).as_posix()).lstrip('./')
-            if normalised and normalised not in unique:
-                unique.append(normalised)
-        return unique
-
     def _register(asset: str) -> tuple[str, dict] | None:
-        token = (asset or '').strip()
-        if re.match(r'^[a-z]+://', token) or token.startswith('data:'):
+        if not asset or re.match(r'^(?:[a-z][a-z\d+.-]*:|//)', asset, re.IGNORECASE):
             return None
-        for candidate in _candidate_paths(asset):
+        candidates = [asset.lstrip('/')]
+        if source_dir and not asset.startswith('/'):
+            candidates[:0] = [posixpath.join(source_dir, asset), posixpath.join(source_dir, 'attachments', asset)]
+        for candidate in dict.fromkeys(posixpath.normpath(path) for path in candidates):
+            if candidate in {'.', '..'} or candidate.startswith('../'):
+                continue
             result = _resolve_media(user_id, zip_file, candidate, write_media=write_media)
             if result is None:
                 continue
@@ -321,37 +333,27 @@ def _rewrite_media_links(
         missing_assets.append(asset)
         return None
 
-    def markdown_replacer(match: re.Match) -> str:
-        original_path = match.group(1)
-        registered = _register(original_path)
-        if not registered:
-            return match.group(0)
-        url, _meta = registered
-        return match.group(0).replace(original_path, url)
+    mask = code_mask(text)
+    edits = []
+    for start, end, target in _image_destinations(text, mask):
+        registered = _register(target)
+        if registered:
+            edits.append((start, end, registered[0]))
 
-    def obsidian_replacer(match: re.Match) -> str:
-        original_path = match.group('path')
-        clean_path = original_path.split('|', 1)[0].strip()
-        registered = _register(clean_path)
-        if not registered:
-            return match.group(0)
-        url, _meta = registered
-        alt = Path(clean_path).stem or 'image'
-        return f'![{alt}]({url})'
+    for pattern in (OBSIDIAN_LINK_PATTERN, MEDIA_WIKI_PATTERN):
+        for match in pattern.finditer(text):
+            if mask[match.start()] or is_escaped(text, match.start()):
+                continue
+            target = match['path'].split('|', 1)[0].strip()
+            registered = _register(target)
+            if registered:
+                alt = Path(target).stem.replace('[', '\\[').replace(']', '\\]') or 'image'
+                edits.append((match.start(), match.end(), f'![{alt}]({registered[0]})'))
+            mask[match.start():match.end()] = b'\1' * len(match[0])
 
-    def wiki_media_replacer(match: re.Match) -> str:
-        original_path = match.group('path')
-        clean_path = original_path.split('|', 1)[0].strip()
-        registered = _register(clean_path)
-        if not registered:
-            return match.group(0)
-        url, _meta = registered
-        alt = Path(clean_path).stem or 'media'
-        return f'![{alt}]({url})'
-
-    rewritten = MEDIA_PATTERN.sub(markdown_replacer, text)
-    rewritten = OBSIDIAN_LINK_PATTERN.sub(obsidian_replacer, rewritten)
-    rewritten = MEDIA_WIKI_PATTERN.sub(wiki_media_replacer, rewritten)
+    rewritten = text
+    for start, end, replacement in sorted(edits, reverse=True):
+        rewritten = rewritten[:start] + replacement + rewritten[end:]
     return rewritten, media_items, missing_assets
 
 
@@ -360,14 +362,14 @@ INLINE_MARKER_PATTERNS = [
     re.compile(r'^__(?P<text>.+?)__$'),
     re.compile(r'^\*(?P<text>.+?)\*$'),
     re.compile(r'^_(?P<text>.+?)_$'),
-    re.compile(r'^`(?P<text>.+?)`$'),
 ]
 
 
 def _clean_front_text(value: str) -> str:
-    value = value.strip()
-    value = HEADING_PATTERN.sub('', value)
-    value = value.strip()
+    value = value.strip('\n').rstrip()
+    if '\n' in value or value.startswith(('    ', '\t')):
+        return value
+    value = value.lstrip()
     while True:
         for pattern in INLINE_MARKER_PATTERNS:
             match = pattern.match(value)
@@ -380,10 +382,11 @@ def _clean_front_text(value: str) -> str:
 
 
 def _compose_front_text(body: str, context: str) -> str:
-    body = (body or '').strip()
+    body = (body or '').strip('\n').rstrip()
     context = (context or '').strip()
     if context and body:
-        return f"{context}\n{body}"
+        separator = '\n\n' if re.match(r'^(?: {4}|\t| {0,3}(?:\d+[.)]|[-+*])[ \t])', body) else '\n'
+        return f'{context}{separator}{body}'
     if context:
         return context
     return body
@@ -412,29 +415,24 @@ def _split_import_id_value(raw_value: str, *, reverse_flag: bool) -> tuple[str |
     return value, None
 
 
-def _update_heading_stack(line: str, stack: list[tuple[int, str]], clean_pattern: re.Pattern) -> int | None:
-    match = HEADING_CAPTURE_PATTERN.match(line)
-    if not match:
-        return None
-    stripped_line = line.strip()
-    title_only = (match.group('title') or '').strip()
-    marker_candidate = f"#{title_only.lstrip('#')}" if title_only else ''
-    
-    # Skip if this line looks like it contains a card marker (not a real heading)
-    if stripped_line and clean_pattern.search(stripped_line):
-        return None
-    if marker_candidate and clean_pattern.search(marker_candidate):
-        return None
-    
-    level = len(match.group('hashes'))
-    title = clean_pattern.sub('', title_only)
-    cleaned = _clean_front_text(title)
-    if not cleaned:
-        return None
+def _update_heading_stack(stack: list[tuple[int, str]], level: int, title: str) -> None:
     while stack and stack[-1][0] >= level:
         stack.pop()
-    stack.append((level, cleaned))
-    return level
+    if title:
+        stack.append((level, title))
+
+
+def _heading_title(value: str) -> str:
+    return _clean_front_text(HEADING_CLOSE_PATTERN.sub('', value.strip()))
+
+
+def _has_card_content(value: str) -> bool:
+    # Comments and property lines alone cannot supply a question or answer.
+    if not value.strip():
+        return False
+    prose = re.sub(r'<!--.*?-->', '', value, flags=re.DOTALL)
+    has_prose = any(line.strip() and not (ID_PATTERN.match(line) or TAGS_PATTERN.match(line)) for line in prose.splitlines())
+    return has_prose or bool(code_block_lines(value))
 
 
 def _parse_markdown_cards(
@@ -456,86 +454,92 @@ def _parse_markdown_cards(
         default=True,
     )
     lines = content.splitlines()
+    block_lines = code_block_lines(content)
+    mask = code_mask(content, block_lines)
+    for _ in _image_destinations(content, mask):
+        pass  # A marker inside an image label or destination is literal.
+    for match in WIKI_LINK_PATTERN.finditer(content):
+        if not is_escaped(content, match.start()):
+            mask[match.start():match.end()] = b'\1' * len(match[0])
+    markers = {}
+    offset = 0
+    for index, line in enumerate(lines):
+        matches = [
+            match for match in resolver.pattern.finditer(line)
+            if not mask[offset + match.start()] and not is_escaped(line, match.start())
+        ]
+        if matches:
+            markers[index] = matches
+        offset += len(line) + 1
+
     parsed_cards: list[ParsedCard] = []
     deck_parts = deck_path or []
+    source_dir = posixpath.dirname(source_path)
     i = 0
+    previous_card_end = 0
     heading_stack: list[tuple[int, str]] = []
+    last_heading_line = None
     while i < len(lines):
         line = lines[i]
-        heading_level = _update_heading_stack(line, heading_stack, resolver.clean_pattern)
-        marker_match = resolver.pattern.search(line)
-        if not marker_match:
+        heading = HEADING_CAPTURE_PATTERN.match(line) if i not in block_lines else None
+        matches = markers.get(i)
+        if not matches:
+            if heading:
+                title = _heading_title(line[heading.end():])
+                _update_heading_stack(heading_stack, len(heading['hashes']), title)
+                last_heading_line = i if title else None
             i += 1
             continue
 
+        marker_match = matches[0]
         line_no = line_offset + i + 1
         marker_start = marker_match.start()
         marker_end = marker_match.end()
-        marker_text = (marker_match.group('marker') or '').lower()
-        rule = resolver.lookup.get(marker_text)
-        reverse_flag = bool(rule and rule.reverse)
+        marker_column = len(line[:marker_start].encode('utf-16-le')) // 2
+        rule = resolver.lookup[marker_match['marker'].lower()]
+        card_errors: list[str] = []
+        if len(matches) > 1:
+            card_errors.append('Use one card marker per line.')
 
-        front_before = line[:marker_start].strip()
-        front_after = line[marker_end:].strip()
-        front_content = front_before or front_after
-        if front_content:
-            front_content = _clean_front_text(front_content)
-
-        # id: belongs to the marker line and drives updates for the current import format.
-        # id:: on the following line is handled below as a legacy external anchor.
         import_id = None
         reverse_import_id = None
-        import_id_match = IMPORT_ID_PATTERN.search(line)
+        front_after = line[marker_end:]
+        import_id_match = IMPORT_ID_PATTERN.match(front_after)
         if import_id_match:
             import_id, reverse_import_id = _split_import_id_value(
-                import_id_match.group(1),
-                reverse_flag=reverse_flag,
+                import_id_match[1], reverse_flag=rule.reverse,
             )
-            if front_content and front_content.lower().startswith('id:'):
-                front_content = ''
-        elif front_after and front_after.lower().startswith('id:'):
-            id_match = re.match(r'id:([^\s]+)', front_after, re.IGNORECASE)
-            if id_match:
-                import_id, reverse_import_id = _split_import_id_value(
-                    id_match.group(1),
-                    reverse_flag=reverse_flag,
-                )
-                front_content = front_before  # Remove the id part from front_content
+            front_after = front_after[import_id_match.end():]
 
-        if not front_content:
-            j = i - 1
-            collected: list[str] = []
-            found_heading = None
-            while j >= 0 and lines[j].strip():
-                stripped_line = lines[j].strip()
-                heading_match = HEADING_CAPTURE_PATTERN.match(stripped_line)
-                if heading_match:
-                    # Headings become context; the front text comes from non-heading content nearby.
-                    j -= 1
-                    continue
-                marker_test = resolver.pattern.search(stripped_line)
-                if marker_test:
-                    # Stop at a previous card boundary instead of borrowing its front text.
-                    break
-                collected.insert(0, stripped_line)
-                j -= 1
+        context_titles = [title for _, title in heading_stack]
+        if heading:
+            level = len(heading['hashes'])
+            title = _heading_title(line[heading.end():marker_start] or front_after)
+            front_content = title
+            context_titles = [parent for depth, parent in heading_stack if depth < level]
+            _update_heading_stack(heading_stack, level, title)
+            last_heading_line = i if title else None
+        else:
+            front_content = _clean_front_text(line[:marker_start].strip() or front_after.strip())
+            if not front_content:
+                start = i
+                while start > previous_card_end:
+                    index = start - 1
+                    if index not in block_lines and (not lines[index].strip() or HEADING_CAPTURE_PATTERN.match(lines[index])):
+                        break
+                    start = index
+                if start < i:
+                    front_content = _clean_front_text('\n'.join(lines[start:i]))
+                elif last_heading_line is not None and last_heading_line >= previous_card_end and all(
+                    not item.strip() for item in lines[last_heading_line + 1:i]
+                ):
+                    front_content = heading_stack[-1][1]
+            if context_titles and context_titles[-1].casefold() == front_content.casefold():
+                context_titles.pop()
 
-            if collected:
-                front_content = '\n'.join(collected).strip()
-            else:
-                front_content = ''
-
-            front_content = _clean_front_text(front_content)
-            if not front_content and heading_stack:
-                front_content = heading_stack[-1][1]
         i += 1
         anchor = None
         tags: list[str] = list(file_tags)
-        card_errors: list[str] = []
-        source_dir_path = Path(source_path).parent
-        source_dir = source_dir_path.as_posix()
-        if source_dir in {'.', ''}:
-            source_dir = None
 
         if i < len(lines):
             anchor_match = ID_PATTERN.match(lines[i])
@@ -552,76 +556,38 @@ def _parse_markdown_cards(
             i += 1
 
         back_lines: list[str] = []
-        long_card_mode = bool(rule and rule.long_card)
-        in_fenced_block = False
-        fence_delim = ''
         consecutive_blank = 0
 
         # Short cards stop at the first blank line. Long cards preserve single blank
         # lines and stop only after two consecutive blanks outside fenced code blocks.
         while i < len(lines):
             candidate = lines[i]
-            stripped_line = candidate.strip()
-
-            if stripped_line.startswith('```') or stripped_line.startswith('~~~'):
-                current_delim = stripped_line[:3]
-                if not in_fenced_block:
-                    in_fenced_block = True
-                    fence_delim = current_delim
-                elif current_delim == fence_delim:
-                    in_fenced_block = False
-                    fence_delim = ''
-
-            if not in_fenced_block and resolver.pattern.search(candidate):
+            if i in markers:
                 break
-
-            if not long_card_mode:
-                if not stripped_line:
-                    break
-                back_lines.append(candidate)
-                i += 1
-                continue
-
-            if not stripped_line and not in_fenced_block:
+            if not candidate.strip() and i not in block_lines:
                 consecutive_blank += 1
-                if consecutive_blank >= 2:
-                    i += 1
+                if not rule.long_card or consecutive_blank >= 2:
                     break
-                back_lines.append('')
-                i += 1
-                continue
-
-            if not stripped_line and in_fenced_block:
-                back_lines.append(candidate)
-                i += 1
-                continue
-
-            consecutive_blank = 0
+            else:
+                consecutive_blank = 0
             back_lines.append(candidate)
             i += 1
 
-        back_md_raw = '\n'.join(back_lines).strip()
-        if not front_content:
-            front_content = _clean_front_text(back_md_raw[:120])
-        else:
-            front_content = _clean_front_text(front_content)
-
-        if not include_heading_context:
-            context_md = ''
-        elif heading_level is not None:
-            context_titles = [title for level, title in heading_stack if level < heading_level]
-            context_md = ' > '.join([title for title in context_titles if title])
-        else:
-            context_titles = [title for _level, title in heading_stack]
-            if context_titles and context_titles[-1].strip().lower() == front_content.strip().lower():
-                context_titles = context_titles[:-1]
-            context_md = ' > '.join([title for title in context_titles if title])
+        previous_card_end = i
+        back_md_raw = '\n'.join(back_lines).rstrip()
+        if not _has_card_content(front_content):
+            card_errors.append('Missing question.')
+        if not _has_card_content(back_md_raw):
+            card_errors.append('Missing answer.')
+        context_md = ' > '.join(context_titles) if include_heading_context else ''
 
         front_md, media_front, missing_front = _rewrite_media_links(
-            front_content, user_id=user_id, zip_file=zip_file, summary=summary, source_dir=source_dir, write_media=write_media,
+            separate_numbered_lists(front_content), user_id=user_id, zip_file=zip_file, summary=summary,
+            source_dir=source_dir, write_media=write_media,
         )
         back_md, media_back, missing_back = _rewrite_media_links(
-            back_md_raw, user_id=user_id, zip_file=zip_file, summary=summary, source_dir=source_dir, write_media=write_media,
+            separate_numbered_lists(back_md_raw), user_id=user_id, zip_file=zip_file, summary=summary,
+            source_dir=source_dir, write_media=write_media,
         )
 
         media: list[dict] = []
@@ -651,12 +617,13 @@ def _parse_markdown_cards(
             deck_path=list(deck_parts),
             errors=list(card_errors),
             marker_line=line_no,
+            marker_column=marker_column,
             marker_kind='card',
             had_explicit_import_id=bool(import_id),
             import_id=import_id,
         )
         parsed_cards.append(base_card)
-        if reverse_flag:
+        if rule.reverse:
             # The reverse copy is a separate card with its own identity. Its back uses
             # the composed front so heading context is retained when front/back swap.
             reverse_key = f"{external_key}__reverse"
@@ -673,6 +640,7 @@ def _parse_markdown_cards(
                     deck_path=list(deck_parts),
                     errors=list(card_errors),
                     marker_line=line_no,
+                    marker_column=marker_column,
                     marker_kind='reverse',
                     had_explicit_import_id=bool(reverse_import_id),
                     import_id=reverse_import_id,
@@ -928,6 +896,7 @@ def _build_markdown_payload(*, user, deck: Deck | None, uploaded_file, audit: bo
                 'source_path': parsed.source_path,
                 'source_anchor': parsed.source_anchor,
                 'marker_line': parsed.marker_line,
+                'marker_column': parsed.marker_column,
                 'marker_kind': parsed.marker_kind,
                 'had_explicit_import_id': parsed.had_explicit_import_id,
                 'deck_path': parsed.deck_path,
@@ -994,11 +963,15 @@ def _note_type_change(user, root_deck: Deck, source_path: str, note_type: str, p
 
 def audit_markdown_note(*, user, root_deck: Deck, source_path: str, content: str, attachments: dict[str, bytes]) -> dict:
     type_change = None
+    errors_by_line = {}
     try:
         upload = _build_uploaded_archive_from_note(source_path=source_path, content=content, attachments=attachments)
         note_type, priority = _obsidian_note_type(content)
         cards = _build_markdown_payload(user=user, deck=root_deck, uploaded_file=upload, audit=True)['cards']
         errors = list(dict.fromkeys(error for card in cards for error in card['errors']))
+        for card in cards:
+            if card['errors']:
+                errors_by_line.setdefault(card['marker_line'], {}).update(dict.fromkeys(card['errors']))
         if cards and not errors:
             type_change = _note_type_change(
                 user, root_deck, _normalise_archive_member_path(source_path), note_type, priority,
@@ -1009,7 +982,7 @@ def audit_markdown_note(*, user, root_deck: Deck, source_path: str, content: str
     identified = [card for card in cards if card['had_explicit_import_id'] or card['source_anchor']]
     matched = [card for card in identified if card['existing']]
     updates = [card for card in matched if card['has_changes'] and not card['errors']]
-    return {
+    result = {
         'identified': len(identified),
         'identities': [
             {'kind': 'marker', 'value': card['import_id']}
@@ -1024,6 +997,11 @@ def audit_markdown_note(*, user, root_deck: Deck, source_path: str, content: str
         'errors': errors,
         **({'note_type_change': type_change} if type_change else {}),
     }
+    if errors_by_line:
+        result['error_locations'] = [
+            {'marker_line': line, 'errors': list(messages)} for line, messages in errors_by_line.items()
+        ]
+    return result
 
 
 def prepare_markdown_note_session(
@@ -1082,9 +1060,10 @@ def apply_markdown_session(session: ImportSession, *, decisions: Dict[int, str] 
 
     invalid_cards = [card for card in cards_payload if card.get('errors')]
     if invalid_cards:
-        sample_errors = invalid_cards[0].get('errors') or []
-        detail = sample_errors[0] if sample_errors else 'validation errors were found'
-        raise MarkdownImportError(f'Resolve the card errors before applying this import. Example: {detail}')
+        card = invalid_cards[0]
+        raise MarkdownImportError(
+            f"Resolve the card errors before applying this import. {card['source_path']} line {card['marker_line']}: {card['errors'][0]}"
+        )
 
     root_deck_id = payload.get('root_deck_id')
     root_deck = None

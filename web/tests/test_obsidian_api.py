@@ -193,6 +193,76 @@ def test_obsidian_tikz_attachment_source_change_is_visible_to_audit(api_client, 
     assert card.media[0]['name'] == f'tikz-{original_digest}.png'
 
 
+def test_obsidian_reverse_cards_reuse_ids_and_preview_matches_audit(api_client, deck_factory):
+    root = deck_factory(name='STEM')
+    api_client.force_login(root.user)
+    prompt = '💡 What does `#card id:ca` mean? ![Circuit #card example](</Images/final%20image.png> "Layout")'
+    line = f'{prompt} #card-reverse'
+    content = f'---\ntitle: Circuit\n---\n{line}\nThe answer.'
+
+    def post_note(endpoint, markdown):
+        data = _preview_payload(source_path='Circuits/Circuit.md', root_deck_path='STEM', source_hash='capture', content=markdown)
+        data['attachment_manifest'] = json.dumps([{'field': 'image', 'path': 'Images/final image.png'}])
+        data['image'] = SimpleUploadedFile('final image.png', b'image bytes', content_type='image/png')
+        return api_client.post(f'/api/v1/obsidian/{endpoint}', data=data)
+
+    def apply(preview):
+        return api_client.post(f"/api/v1/obsidian/preview/{preview['session_id']}/apply",
+                               data=json.dumps({'source_hash': 'capture'}), content_type='application/json')
+
+    audit = post_note('audit-note', content).json()
+    response = post_note('preview', content)
+    assert response.status_code == 201
+    preview = response.json()
+    forward, reverse = preview['cards']
+    assert audit['without_ids'] == len(preview['cards']) == 2
+    assert not audit['errors'] and not preview['has_errors']
+    assert forward['marker_line'] == reverse['marker_line'] == 4
+    assert forward['marker_column'] == reverse['marker_column'] == len(f'{prompt} '.encode('utf-16-le')) // 2
+    assert '`#card id:ca`' in forward['front_md']
+    assert forward['front_md'].endswith(' "Layout")')
+    assert forward['front_md'] == reverse['back_md']
+    applied = apply(preview)
+    assert applied.status_code == 200
+    assert applied.json()['summary']['created'] == 2
+
+    cards = {card.import_id: card for card in Card.objects.filter(user=root.user)}
+    stable = {import_id: card.pk for import_id, card in cards.items()}
+    state = cards[forward['import_id']].scheduling_state
+    state.interval_days = 12
+    state.save(update_fields=['interval_days'])
+    synced = content.replace(line, f"{line} id:{forward['import_id']}|{reverse['import_id']}").replace('The answer.', 'Updated answer.')
+    audit = post_note('audit-note', synced).json()
+    again = post_note('preview', synced).json()
+    assert audit['found'] == audit['updates'] == again['summary']['updates'] == 2
+    assert apply(again).json()['summary']['updated'] == 2
+    assert {card.import_id: card.pk for card in Card.objects.filter(user=root.user)} == stable
+    state.refresh_from_db()
+    assert state.interval_days == 12
+
+
+def test_obsidian_missing_answer_blocks_apply_and_audit_reports_location(api_client, deck_factory):
+    root = deck_factory(name='STEM')
+    api_client.force_login(root.user)
+    payload = _preview_payload(
+        source_path='Notes/Circuit.md', root_deck_path='STEM', source_hash='incomplete',
+        content='# Topic\n\nAsk a question. #card',
+    )
+    preview = api_client.post('/api/v1/obsidian/preview', data=payload).json()
+    assert preview['has_errors']
+    assert preview['cards'][0]['errors'] == ['Missing answer.']
+    audit = api_client.post('/api/v1/obsidian/audit-note', data=payload).json()
+    assert audit['error_locations'] == [{'marker_line': 3, 'errors': ['Missing answer.']}]
+    response = api_client.post(
+        f"/api/v1/obsidian/preview/{preview['session_id']}/apply",
+        data=json.dumps({'source_hash': 'incomplete', 'decisions': [{'index': 0, 'action': 'skip'}]}),
+        content_type='application/json',
+    )
+    assert response.status_code == 400
+    assert 'Notes/Circuit.md line 3: Missing answer.' in response.json()['error']
+    assert not Card.objects.filter(user=root.user).exists()
+
+
 def test_obsidian_preview_apply_creates_cards_and_nested_decks(api_client, user_factory, deck_factory):
     user = user_factory()
     root = deck_factory(user=user, name='STEM', parent=None)

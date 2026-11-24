@@ -39,18 +39,25 @@ export class CorvusClient {
 
   async createPreview(source: NoteSyncSource): Promise<PreviewSession> {
     const preview = await this.sendNote<PreviewSession>("/api/v1/obsidian/preview", source);
-    const lineNumbers = source.originalLineNumbers;
-    if (lineNumbers) {
-      for (const card of preview.cards) {
-        card.marker_line = lineNumbers[card.marker_line - 1] ?? card.marker_line;
+    for (const card of preview.cards) {
+      if (card.marker_column != null && source.originalMarkerColumn) {
+        card.marker_column = source.originalMarkerColumn(card.marker_line, card.marker_column);
       }
+      card.marker_line = source.originalLineNumbers?.[card.marker_line - 1] ?? card.marker_line;
     }
     return preview;
   }
 
   async auditNote(source: NoteSyncSource): Promise<NoteSyncAudit> {
     try {
-      return await this.sendNote("/api/v1/obsidian/audit-note", source);
+      const audit = await this.sendNote<NoteSyncAudit>("/api/v1/obsidian/audit-note", source);
+      if (audit.error_locations?.length) {
+        audit.errors = audit.error_locations.flatMap(({ marker_line, errors }) => {
+          const line = source.originalLineNumbers?.[marker_line - 1] ?? marker_line;
+          return errors.map((error) => `Line ${line} · ${error}`);
+        });
+      }
+      return audit;
     } catch (error) {
       if (!(error instanceof Error)) throw error;
       throw new Error(`${error.message} (note: ${source.path})`);

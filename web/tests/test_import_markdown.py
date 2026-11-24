@@ -635,9 +635,7 @@ def test_md_same_line_marker_does_not_include_previous_marker(user_factory, deck
     cards = Card.objects.filter(user=user).order_by('import_id')
     assert cards[0].front_md == 'What is the capital of France?'
     assert cards[1].front_md == 'What is the capital of Germany?'
-    #common bug
-    assert 'id' or 'card' not in cards[1].front_md
-    assert 'id' or 'card' not in cards[0].front_md
+    assert all('#card' not in card.front_md and 'id:' not in card.front_md for card in cards)
 
 
 def test_md_duplicate_import_ids_in_session_show_errors(user_factory, deck_factory):
@@ -1083,14 +1081,7 @@ def test_hierarchy_identical_to_card_front_removes_last_entry(user_factory, deck
     record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
     card = Card.objects.get(user=user)
     
-    # Should NOT have duplicate "Card Topic"
-    front_lines = card.front_md.split('\n')
-    if len(front_lines) > 1:
-        # If hierarchy, should not repeat Card Topic twice
-        context_line = front_lines[0]
-        card_line = front_lines[1]
-        # They should be different or hierarchy should not repeat the title
-        assert not context_line.endswith('Card Topic > Card Topic')
+    assert card.front_md == 'Section\nCard Topic'
 
 
 def test_frontmatter_card_heading_context_false_removes_heading_prefix(user_factory, deck_factory):
@@ -1398,20 +1389,101 @@ def test_card_with_empty_back(user_factory, deck_factory):
     
     assert card['front_md'].strip() == 'Question'
     assert card['back_md'].strip() == ''
+    assert card['errors'] == ['Missing answer.']
+    with pytest.raises(MarkdownImportError, match=r'note.md line 1: Missing answer'):
+        apply_markdown_session(session)
+    assert not Card.objects.filter(user=user).exists()
 
 
-def test_marker_with_no_front_uses_first_back_lines(user_factory, deck_factory):
-    """Test that when front is empty, it takes first ~120 chars from back."""
+def test_marker_with_no_front_does_not_copy_the_answer(user_factory, deck_factory):
     user = user_factory()
     deck = deck_factory(user=user)
-    long_back = 'This is a very long back content that will be used as front when front is empty or missing.'
-    markdown = f'#card\n{long_back}'
+    markdown = '---\ntitle: Note title\n---\n#card\nAnswer only'
     archive = _build_zip({'note.md': markdown})
-    record = process_markdown_archive(user=user, deck=deck, uploaded_file=archive)
-    card = Card.objects.get(user=user)
-    
-    # Front should be derived from back
-    assert 'This is a very long' in card.front_md
+    session = prepare_markdown_session(user=user, deck=deck, uploaded_file=archive)
+    card = session.payload['cards'][0]
+
+    assert card['front_md'] == ''
+    assert card['back_md'] == 'Answer only'
+    assert card['errors'] == ['Missing question.']
+    with pytest.raises(MarkdownImportError, match=r'note.md line 4: Missing question'):
+        apply_markdown_session(session)
+
+
+def test_marked_heading_replaces_siblings_and_preserves_title_markdown(user_factory):
+    markdown = (
+        '# Electronics\n## Previous topic\n### Old subsection\n'
+        '## C# and `git status` ## #card\nThe answer.\n\n'
+        'New prompt #card\nAnother answer.\n'
+    )
+    session = prepare_markdown_session(user=user_factory(), deck=None, uploaded_file=_build_zip({'note.md': markdown}))
+    assert [card['front_md'] for card in session.payload['cards']] == [
+        'Electronics\nC# and `git status`',
+        'Electronics > C# and `git status`\nNew prompt',
+    ]
+
+
+@pytest.mark.parametrize('separator', ['', '\n'])
+def test_next_question_cannot_reuse_text_consumed_by_the_previous_card(user_factory, separator):
+    markdown = f'First #card\nFirst answer\n{separator}Second question\n#card\nSecond answer'
+    session = prepare_markdown_session(user=user_factory(), deck=None, uploaded_file=_build_zip({'note.md': markdown}))
+    first, second = session.payload['cards']
+
+    assert first['back_md'] == ('First answer' if separator else 'First answer\nSecond question')
+    assert second['front_md'] == ('Second question' if separator else '')
+    assert second['back_md'] == 'Second answer'
+    assert second['errors'] == ([] if separator else ['Missing question.'])
+
+
+def test_short_card_keeps_fences_and_ignores_literal_markers_and_images(user_factory):
+    front = 'What does `#card id:123` mean?'
+    back = '````markdown\n```\n\n$x$\n![example](missing.png)\n#card id:999\n```\n````'
+    markdown = f'```md\nExample #card\n```\n\n\\#card literal\n\n{front} #card id:321\n{back}'
+    session = prepare_markdown_session(user=user_factory(), deck=None, uploaded_file=_build_zip({'note.md': markdown}))
+    card, = session.payload['cards']
+
+    assert (card['front_md'], card['back_md'], card['import_id']) == (front, back, '321')
+    assert card['errors'] == []
+    assert card['media'] == []
+
+
+def test_code_block_front_and_inline_code_answer_are_valid(user_factory):
+    front = '~~~python\nprint("one")\n\nprint("two")\n~~~'
+    markdown = f'{front}\n#card\n`![literal attachment](missing.png)`'
+    session = prepare_markdown_session(user=user_factory(), deck=None, uploaded_file=_build_zip({'note.md': markdown}))
+    card, = session.payload['cards']
+    assert card['front_md'] == front
+    assert card['back_md'] == '`![literal attachment](missing.png)`'
+    assert card['errors'] == []
+
+
+def test_multiline_front_preserves_numbered_items_and_nested_bullets(user_factory):
+    markdown = '#revision\n\nCompare these.\n3. `git status`\n   - Shows status\n4. `git diff`\n#card\nAnswer'
+    session = prepare_markdown_session(user=user_factory(), deck=None, uploaded_file=_build_zip({'note.md': markdown}))
+    card, = session.payload['cards']
+    assert card['front_md'] == 'Compare these.\n\n3. `git status`\n   - Shows status\n4. `git diff`'
+
+
+def test_image_only_and_math_only_sides_are_valid_and_keep_image_labels(user_factory):
+    markdown = '![Diagram](<../Images/diagram final.png> "Circuit layout")\n#card\n$$I_E = I_C + I_B$$'
+    archive = _build_zip({'Notes/card.md': markdown, 'Images/diagram final.png': 'diagram bytes'})
+    session = prepare_markdown_session(user=user_factory(), deck=None, uploaded_file=archive)
+    card, = session.payload['cards']
+
+    assert card['errors'] == []
+    assert card['front_md'].startswith('![Diagram](/media/')
+    assert card['front_md'].endswith(' "Circuit layout")')
+    assert card['back_md'] == '$$I_E = I_C + I_B$$'
+
+
+def test_parentheses_and_matching_basenames_resolve_to_distinct_images(user_factory):
+    markdown = 'Q #long-card\n![A](<Lab A/circuit(1).png>)\n\n![B](Lab%20B/circuit(1).png)'
+    archive = _build_zip({'note.md': markdown, 'Lab A/circuit(1).png': 'a', 'Lab B/circuit(1).png': 'b'})
+    session = prepare_markdown_session(user=user_factory(), deck=None, uploaded_file=archive)
+    card, = session.payload['cards']
+    assert card['errors'] == []
+    assert len({item['hash'] for item in card['media']}) == 2
+    assert card['back_md'].count('/media/') == 2
 
 
 # ============================================================================

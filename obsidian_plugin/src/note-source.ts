@@ -1,6 +1,7 @@
 import { App, TFile, normalizePath, parseYaml } from "obsidian";
 
 import { sha256Hex } from "./hash";
+import { isEscaped, markdownCodeMask, markdownImageDestinations } from "./markdown-syntax";
 import { prepareTikzAttachments } from "./tikz-attachments";
 import { renderTikzImage } from "./tikz-renderer";
 import type {
@@ -11,7 +12,6 @@ import type {
 } from "./types";
 
 const WIKI_EMBED_RE = /!\[\[([^\]]+)\]\]/g;
-const MARKDOWN_IMAGE_RE = /!\[[^\]]*]\(([^)]+)\)/g;
 const LOCAL_MEDIA_EXTENSIONS = new Set([
   "png",
   "jpg",
@@ -34,7 +34,7 @@ export async function collectNoteSource(app: App, file: TFile, originalContent: 
     renderTikzImage(app, markdown, file.path, digest),
   );
   const attachmentFiles = new Map<string, TFile>();
-  const content = collectAttachmentsAndRewriteContent(app, file, tikz.content, attachmentFiles, tikz.images);
+  const rewritten = collectAttachmentsAndRewriteContent(app, file, tikz.content, attachmentFiles, tikz.images);
   const attachments = await readAttachments(app, attachmentFiles);
   for (const [path, data] of tikz.images) {
     if (attachmentFiles.has(path)) throw new Error(`Attachment path conflicts with a rendered TikZ image: ${path}`);
@@ -50,9 +50,10 @@ export async function collectNoteSource(app: App, file: TFile, originalContent: 
   return {
     file,
     path: file.path,
-    content,
+    content: rewritten.content,
     sourceHash: await sha256Hex(originalContent),
     originalLineNumbers: tikz.originalLineNumbers,
+    originalMarkerColumn: rewritten.originalMarkerColumn,
     attachments,
   };
 }
@@ -199,36 +200,32 @@ function collectAttachmentsAndRewriteContent(
   content: string,
   attachmentFiles: Map<string, TFile>,
   generatedImages: Map<string, ArrayBuffer>,
-): string {
+): { content: string; originalMarkerColumn?: NoteSyncSource["originalMarkerColumn"] } {
   const rewrites: TextRewrite[] = [];
+  const mask = markdownCodeMask(content);
+  for (const image of markdownImageDestinations(content, mask)) {
+    const target = stripMarkdownTarget(image.target);
+    if (generatedImages.has(target)) continue;
+    const attachment = resolveRelativeAttachment(app, noteFile, target);
+    if (attachment) {
+      attachmentFiles.set(attachment.path, attachment);
+      rewrites.push({ start: image.start, end: image.end, replacement: `</${attachment.path.split("/").map(encodeURIComponent).join("/")}>` });
+    }
+  }
 
   for (const match of content.matchAll(WIKI_EMBED_RE)) {
+    const start = match.index!;
+    if (mask[start] || isEscaped(content, start)) continue;
     const rawTarget = match[1] ?? "";
     const cleanTarget = stripWikiTarget(rawTarget);
     const attachment = resolveWikiAttachment(app, noteFile, cleanTarget);
     if (attachment) {
       attachmentFiles.set(attachment.path, attachment);
-      const targetStart = (match.index ?? 0) + 3;
+      const targetStart = start + 3;
       rewrites.push({
         start: targetStart,
         end: targetStart + rawTarget.length,
-        replacement: rewriteWikiTarget(rawTarget, attachment.path),
-      });
-    }
-  }
-
-  for (const match of content.matchAll(MARKDOWN_IMAGE_RE)) {
-    const originalTarget = match[1] ?? "";
-    const rawTarget = stripMarkdownTarget(originalTarget);
-    if (generatedImages.has(rawTarget)) continue;
-    const attachment = resolveRelativeAttachment(app, noteFile, rawTarget);
-    if (attachment) {
-      attachmentFiles.set(attachment.path, attachment);
-      const targetStart = (match.index ?? 0) + match[0].lastIndexOf("(") + 1;
-      rewrites.push({
-        start: targetStart,
-        end: targetStart + originalTarget.length,
-        replacement: attachment.path,
+        replacement: rewriteWikiTarget(rawTarget, `/${attachment.path}`),
       });
     }
   }
@@ -269,11 +266,12 @@ function rewriteWikiTarget(rawTarget: string, resolvedPath: string): string {
 }
 
 function stripMarkdownTarget(rawTarget: string): string {
-  const value = rawTarget.trim().replace(/^<|>$/g, "");
-  if (/^(?:https?:|data:)/i.test(value)) {
-    return "";
+  if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(rawTarget)) return "";
+  try {
+    return decodeURIComponent(rawTarget);
+  } catch {
+    return rawTarget;
   }
-  return value;
 }
 
 function resolveWikiAttachment(app: App, noteFile: TFile, linkPath: string): TFile | null {
@@ -292,10 +290,18 @@ function resolveRelativeAttachment(app: App, noteFile: TFile, relativePath: stri
     return null;
   }
   const noteDirectory = noteFile.parent?.path ?? "";
-  const resolvedPath = noteDirectory
-    ? normalizePath(`${noteDirectory}/${relativePath}`)
-    : normalizePath(relativePath);
-  const file = app.vault.getAbstractFileByPath(resolvedPath);
+  const target = relativePath.startsWith("/") || !noteDirectory ? relativePath : `${noteDirectory}/${relativePath}`;
+  const segments: string[] = [];
+  for (const segment of normalizePath(target).split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (!segments.length) return null;
+      segments.pop();
+    } else {
+      segments.push(segment);
+    }
+  }
+  const file = app.vault.getAbstractFileByPath(segments.join("/"));
   if (!(file instanceof TFile)) {
     return null;
   }
@@ -312,16 +318,40 @@ interface TextRewrite {
   replacement: string;
 }
 
-function applyTextRewrites(content: string, rewrites: TextRewrite[]): string {
-  if (rewrites.length === 0) {
-    return content;
+function applyTextRewrites(content: string, rewrites: TextRewrite[]): {
+  content: string;
+  originalMarkerColumn?: NoteSyncSource["originalMarkerColumn"];
+} {
+  if (!rewrites.length) return { content };
+  const editsByLine = new Map<number, { end: number; delta: number }[]>();
+  const parts: string[] = [];
+  let cursor = 0;
+  let line = 1;
+  let lineStart = 0;
+  let delta = 0;
+  let nextBreak = content.indexOf("\n");
+  for (const edit of rewrites.sort((a, b) => a.start - b.start)) {
+    while (nextBreak !== -1 && nextBreak < edit.start) {
+      line += 1;
+      lineStart = nextBreak + 1;
+      nextBreak = content.indexOf("\n", lineStart);
+      delta = 0;
+    }
+    const outputEnd = edit.start - lineStart + delta + edit.replacement.length;
+    const difference = edit.replacement.length - (edit.end - edit.start);
+    const edits = editsByLine.get(line) ?? [];
+    edits.push({ end: outputEnd, delta: difference });
+    editsByLine.set(line, edits);
+    delta += difference;
+    parts.push(content.slice(cursor, edit.start), edit.replacement);
+    cursor = edit.end;
   }
-
-  let rewritten = content;
-  for (const rewrite of [...rewrites].sort((a, b) => b.start - a.start)) {
-    rewritten = `${rewritten.slice(0, rewrite.start)}${rewrite.replacement}${rewritten.slice(rewrite.end)}`;
-  }
-  return rewritten;
+  parts.push(content.slice(cursor));
+  return {
+    content: parts.join(""),
+    originalMarkerColumn: (lineNumber, column) => column - (editsByLine.get(lineNumber) ?? [])
+      .filter(({ end }) => end <= column).reduce((total, edit) => total + edit.delta, 0),
+  };
 }
 
 function detectContentType(extension: string): string {

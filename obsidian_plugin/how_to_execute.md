@@ -125,6 +125,8 @@ The plugin and Corvus only check these kebab-case frontmatter keys. Other frontm
 - `card-tags`: read by Corvus. These tags are applied to every card imported from that markdown file.
 - `card-heading-context`: read by Corvus. Set to `false` to stop Corvus from prepending the Markdown heading hierarchy to each imported card front.
 
+See [the Markdown import guide](../docs/HOW_TO_IMPORT.md) for examples of headings, inline code, fenced blocks, image links, and missing-side errors. The sync preview points to the original marker line in the vault note.
+
 Use `Corvus Sync: Sync Current Note` on each source note. When creating a custom study preset, the plugin follows `questions-source` and `exercises-source` from each note linked by the preset note. Main notes default to Questions. Exercise companions count as Exercises unless they specify a `note-type`.
 
 If you change a synced note's `note-type`, the vault sync check lists it under **Updates** and the note sync preview shows the new type.

@@ -1,10 +1,12 @@
 import { App, TFile } from "obsidian";
 
 import { sha256Hex } from "./hash";
+import { cardMarkerAt, cardMarkers } from "./markdown-syntax";
 import type { ApplyResponse, PreviewSession } from "./types";
 
 interface WritebackGroup {
   line: number;
+  column: number | null;
   cardId: string | null;
   reverseId: string | null;
 }
@@ -15,12 +17,6 @@ export async function writeBackImportIds(
   preview: PreviewSession,
   result: ApplyResponse,
 ): Promise<number> {
-  const currentContent = await app.vault.cachedRead(file);
-  const currentHash = await sha256Hex(currentContent);
-  if (currentHash !== preview.source_hash) {
-    throw new Error("The note changed after preview. Run the sync again before writing IDs.");
-  }
-
   const previewByIndex = new Map(preview.cards.map((card) => [card.index, card]));
   const grouped = new Map<number, WritebackGroup>();
 
@@ -35,6 +31,7 @@ export async function writeBackImportIds(
     }
     const group = grouped.get(previewCard.marker_line) ?? {
       line: previewCard.marker_line,
+      column: previewCard.marker_column ?? null,
       cardId: null,
       reverseId: null,
     };
@@ -50,7 +47,13 @@ export async function writeBackImportIds(
     return 0;
   }
 
-  const lines = currentContent.split(/\r?\n/);
+  const currentContent = await app.vault.cachedRead(file);
+  const changedMessage = "Corvus saved the cards, but the note changed before their IDs could be written.";
+  if (await sha256Hex(currentContent) !== preview.source_hash) {
+    throw new Error(changedMessage);
+  }
+
+  const lines = currentContent.split(/(?<=\n)/);
   const groups = Array.from(grouped.values()).sort((a, b) => b.line - a.line);
   let writes = 0;
 
@@ -67,38 +70,33 @@ export async function writeBackImportIds(
   }
 
   if (writes > 0) {
-    await app.vault.modify(file, lines.join(currentContent.includes("\r\n") ? "\r\n" : "\n"));
+    const updated = lines.join("");
+    await app.vault.process(file, (latest) => {
+      if (latest !== currentContent) {
+        throw new Error(changedMessage);
+      }
+      return updated;
+    });
   }
 
   return writes;
 }
 
 function replaceMarkerLine(line: string, group: WritebackGroup): string {
-  const markerPattern = /(#(?:long-)?card(?:-reverse)?)(?=$|\s)(?:\s+id:[^\s]+)?/i;
-  const match = line.match(markerPattern);
+  const candidates = group.column === null ? cardMarkers(line) : [];
+  const match = group.column === null
+    ? (candidates.length === 1 ? candidates[0] : undefined)
+    : cardMarkerAt(line, group.column);
   if (!match) {
-    throw new Error(`Marker line ${group.line} no longer contains a supported card marker.`);
+    throw new Error(`Could not locate the card marker on line ${group.line}.`);
   }
 
   const marker = match[1];
-  const isReverseMarker = /#(?:long-)?card-reverse/i.test(marker);
-
-  if (isReverseMarker) {
-    if (group.cardId && group.reverseId) {
-      return line.replace(markerPattern, `${marker} id:${group.cardId}|${group.reverseId}`);
-    }
-    if (group.cardId) {
-      return line.replace(markerPattern, `${marker} id:${group.cardId}`);
-    }
-    if (group.reverseId) {
-      return line.replace(markerPattern, `${marker} id:${group.reverseId}`);
-    }
-    return line;
-  }
-
-  if (!group.cardId) {
-    return line;
-  }
-
-  return line.replace(markerPattern, `${marker} id:${group.cardId}`);
+  const [currentId = "", currentReverseId = ""] = (match[2] ?? "").split("|", 2);
+  const forwardId = group.cardId ?? currentId;
+  const reverseId = group.reverseId ?? currentReverseId;
+  const ids = marker.toLowerCase().endsWith("-reverse") && reverseId ? `${forwardId}|${reverseId}` : forwardId;
+  if (!ids) return line;
+  const start = match.index!;
+  return `${line.slice(0, start)}${marker} id:${ids}${line.slice(start + match[0].length)}`;
 }

@@ -8,9 +8,10 @@ const { outputFiles } = await build({
   stdin: {
     contents: `
       export { prepareTikzAttachments } from "./src/tikz-attachments";
+      export { collectNoteSource } from "./src/note-source";
       export { writeBackImportIds } from "./src/writeback";
       export { CorvusClient } from "./src/corvus-client";
-      export { setResponse } from "obsidian";
+      export { setResponse, TFile } from "obsidian";
     `,
     resolveDir: fileURLToPath(new URL("../", import.meta.url)),
   },
@@ -22,6 +23,19 @@ const { outputFiles } = await build({
     setup(builder) {
       builder.onResolve({ filter: /^obsidian$/ }, () => ({ path: "obsidian", namespace: "mock" }));
       builder.onLoad({ filter: /.*/, namespace: "mock" }, () => ({ contents: `
+        export class App {}
+        export class Component {}
+        export class MarkdownRenderer {}
+        export class TFile {
+          constructor(path) {
+            this.path = path;
+            this.name = path.split("/").at(-1);
+            this.extension = this.name.split(".").at(-1);
+            this.parent = { path: path.split("/").slice(0, -1).join("/") };
+          }
+        }
+        export const normalizePath = (path) => path.replace(/^\\//, "");
+        export const parseYaml = () => ({});
         let response;
         export function setResponse(value) { response = value; }
         export async function requestUrl() { return response; }
@@ -29,7 +43,7 @@ const { outputFiles } = await build({
     },
   }],
 });
-const { prepareTikzAttachments, writeBackImportIds, CorvusClient, setResponse } = await import(
+const { prepareTikzAttachments, collectNoteSource, writeBackImportIds, CorvusClient, setResponse, TFile } = await import(
   `data:text/javascript;base64,${Buffer.from(outputFiles[0].contents).toString("base64")}`
 );
 
@@ -65,7 +79,7 @@ test("replaces real TikZ blocks once per source and keeps original card marker l
   assert.deepEqual(preview.cards.map((card) => card.marker_line), [originalMarkerLine, originalMarkerLine]);
 
   let updated;
-  const app = { vault: { cachedRead: async () => original, modify: async (_, content) => { updated = content; } } };
+  const app = { vault: { cachedRead: async () => original, process: async (_, update) => { updated = update(original); } } };
   const count = await writeBackImportIds(app, {}, preview, { cards: [
     { index: 0, marker_line: serverMarkerLine, marker_kind: "card", import_id: "a1" },
     { index: 1, marker_line: serverMarkerLine, marker_kind: "reverse", import_id: "a2" },
@@ -98,4 +112,71 @@ test("leaves TeX math and fenced Markdown examples intact and reports renderer e
     prepareTikzAttachments(circuit.slice(0, -1).join("\n"), "Circuit.md", async () => png),
     /Unclosed TikZ block in Circuit\.md at line 1/,
   );
+});
+
+test("ID writeback preserves the note's line endings and existing reverse ID", async () => {
+  const original = "Title\r\n\nQuestion #card-reverse id:|ab\r\nAnswer\n";
+  const sourceHash = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(original))).toString("hex");
+  let updated;
+  const app = { vault: { cachedRead: async () => original, process: async (_, update) => { updated = update(original); } } };
+  const preview = { source_hash: sourceHash, cards: [{ index: 0, marker_line: 3, marker_column: 9, will_write_back_id: true }] };
+
+  await writeBackImportIds(app, {}, preview, { cards: [{ index: 0, marker_kind: "card", import_id: "cd" }] });
+  assert.equal(updated, "Title\r\n\nQuestion #card-reverse id:cd|ab\r\nAnswer\n");
+});
+
+test("rewrites only real image destinations and adds IDs at the original marker after attachment and TikZ edits", async () => {
+  const question = '💡 What does `#card id:1a` mean? ![Circuit](<Images/diagram final.png> "Layout") #card-reverse id:beef';
+  const lines = ["---", "title: Circuit", "---", ...circuit, "", question, "![Alternate](Images/circuit(1).png)", "",
+    "```md", "![[Images/literal.png]]", "```", "", "> ```md", "> ![[Images/literal.png]]", "> ```", "", "`![Literal](Images/literal.png)`"];
+  const original = lines.join("\r\n");
+  const assets = new Map(["diagram final.png", "circuit(1).png", "literal.png"].map((name) => {
+    const path = `Notes/Images/${name}`;
+    return [path, new TFile(path)];
+  }));
+  let updated;
+  const app = {
+    vault: {
+      getAbstractFileByPath: (path) => assets.get(path),
+      readBinary: async () => png,
+      cachedRead: async () => original,
+      process: async (_, update) => { updated = update(original); },
+    },
+    metadataCache: { getFirstLinkpathDest: (path) => assets.get(`Notes/${path}`) },
+  };
+  const file = new TFile("Notes/Circuit.md");
+  const tikz = await prepareTikzAttachments(original, file.path, async () => png);
+  const source = await collectNoteSource(app, file, tikz.content);
+  const attachmentPaths = source.attachments.map(({ path }) => path);
+  assert.deepEqual(attachmentPaths, ["Notes/Images/diagram final.png", "Notes/Images/circuit(1).png"]);
+  assert.ok(source.content.includes('![Circuit](</Notes/Images/diagram%20final.png> "Layout")'));
+  assert.ok(source.content.includes("![[Images/literal.png]]"));
+  assert.ok(source.content.includes("`![Literal](Images/literal.png)`"));
+
+  const serverLine = source.content.split("\r\n").findIndex((line) => line.includes("#card-reverse")) + 1;
+  const serverColumn = source.content.split("\r\n")[serverLine - 1].indexOf("#card-reverse");
+  const sourceHash = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(original))).toString("hex");
+  setResponse({ status: 201, headers: {}, text: JSON.stringify({
+    source_hash: sourceHash,
+    cards: [{ index: 1, marker_line: serverLine, marker_column: serverColumn, will_write_back_id: true }],
+  }) });
+  const client = new CorvusClient({ baseUrl: "https://corvus.example", rootDeckPath: "STEM" });
+  const originalSource = { ...source, sourceHash, originalLineNumbers: tikz.originalLineNumbers };
+  const preview = await client.createPreview(originalSource);
+  assert.equal(preview.cards[0].marker_line, lines.indexOf(question) + 1);
+  assert.equal(preview.cards[0].marker_column, question.indexOf("#card-reverse"));
+  await writeBackImportIds(app, file, preview, { cards: [{ index: 1, marker_kind: "reverse", import_id: "bef0" }] });
+  assert.equal(updated, original.replace(`${question}\r\n`, `${question}|bef0\r\n`));
+
+  app.vault.process = async (_, update) => { updated = update(`${original}\r\nAn unsynced edit.`); };
+  await assert.rejects(
+    writeBackImportIds(app, file, preview, { cards: [{ index: 1, marker_kind: "reverse", import_id: "bef0" }] }),
+    /note changed before their IDs could be written/,
+  );
+
+  setResponse({ status: 200, headers: {}, text: JSON.stringify({
+    errors: ["Missing answer."], error_locations: [{ marker_line: serverLine, errors: ["Missing answer."] }],
+  }) });
+  const audit = await client.auditNote(originalSource);
+  assert.deepEqual(audit.errors, [`Line ${lines.indexOf(question) + 1} · Missing answer.`]);
 });

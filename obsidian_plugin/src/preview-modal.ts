@@ -1,5 +1,6 @@
 import { ButtonComponent, MarkdownRenderChild, MarkdownRenderer, Modal } from "obsidian";
 
+import { markdownCodeMask, markdownImageDestinations } from "./markdown-syntax";
 import type { ApplyDecision, PreviewCard, PreviewSession } from "./types";
 
 export class SyncPreviewModal extends Modal {
@@ -225,9 +226,13 @@ export class SyncPreviewModal extends Modal {
     const renderChild = new MarkdownRenderChild(bodyEl);
     this.markdownChildren.push(renderChild);
     const mediaBase = this.serverUrl.replace(/\/+$/, "");
-    const withServerMedia = markdown.replace(/(!\[[^\]\r\n]*\]\()(\/media\/\d+\/[a-f\d]{40}\.[\w-]+)(?=\))/gi,
-      (_, start: string, path: string) => `${start}${mediaBase}${path}`,
-    );
+    const images = markdownImageDestinations(markdown, markdownCodeMask(markdown));
+    let withServerMedia = markdown;
+    for (const { start, end, target } of images.reverse()) {
+      if (/^\/media\/\d+\/[a-f\d]{40}(?:\.[\w-]+)?$/i.test(target)) {
+        withServerMedia = `${withServerMedia.slice(0, start)}${mediaBase}${target}${withServerMedia.slice(end)}`;
+      }
+    }
     void MarkdownRenderer.render(this.app, withServerMedia, bodyEl, "", renderChild);
   }
 

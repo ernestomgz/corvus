@@ -92,3 +92,18 @@ def test_render_handles_plain_markdown():
     html = render_to_html('# Title\n\n*Item*')
     assert '<h1>' in html
     assert '<em>Item</em>' in html
+
+
+def test_inline_code_preserves_math_wiki_links_and_example_images():
+    html = render_to_html('`$x$` and ``[[Example|Label]] ` ![example](a.png)`` and $y$.')
+    assert '<code>$x$</code>' in html
+    assert '<code>[[Example|Label]] ` ![example](a.png)</code>' in html
+    assert html.count('math-inline') == 1
+    assert '<img' not in html
+
+
+def test_ordered_list_preserves_start_and_nested_list_structure():
+    html = render_to_html('3. Check the current.\n   - Compare it with the expected value.\n4. Check the voltage.')
+    assert '<ol start="3">' in html
+    assert '<li>Check the current.\n<ul>' in html
+    assert '<li>Check the voltage.</li>' in html
